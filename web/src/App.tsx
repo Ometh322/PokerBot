@@ -10,12 +10,16 @@ type View = { kind: 'home' } | { kind: 'create' } | { kind: 'table'; code: strin
 
 const tg = window.Telegram?.WebApp
 
-// Приглашение приходит либо из initData.start_param (Telegram),
-// либо из хэша ссылки-фолбэка (BASE_URL/#tbl_код, когда бота нет).
+// Приглашение приходит одним из способов:
+// - initData.start_param (зарегистрированное в BotFather Mini App);
+// - ?table=<код> — кнопка бота из deep-link-приглашения;
+// - #tbl_<код> — старый фолбэк.
 function viewFromStartParam(startParam?: string | null): View | null {
   if (startParam && startParam.startsWith('tbl_')) {
     return { kind: 'table', code: startParam.slice(4) }
   }
+  const query = new URLSearchParams(window.location.search).get('table')
+  if (query) return { kind: 'table', code: query.replace(/^tbl_/, '') }
   const hash = window.location.hash.replace(/^#/, '')
   if (hash.startsWith('tbl_')) return { kind: 'table', code: hash.slice(4) }
   return null

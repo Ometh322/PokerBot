@@ -13,6 +13,7 @@ from aiogram.enums import ParseMode
 from app.api.app import create_app
 from app.bot import sender
 from app.bot.info import set_bot_username
+from app.bot.net import make_bot_session
 from app.bot.router import router as bot_router
 from app.config import get_settings
 
@@ -40,6 +41,10 @@ async def run() -> None:
 
     bot = Bot(
         token=settings.bot_token,
+        session=make_bot_session(
+            proxy=settings.proxy_url or None,
+            api_ip=settings.telegram_api_ip or None,
+        ),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()

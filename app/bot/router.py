@@ -36,11 +36,21 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
 
     # Deep link вида t.me/<bot>?start=tbl_<code> — приглашение за стол.
     if payload.startswith("tbl_"):
+        code = payload.removeprefix("tbl_")
+        settings = get_settings()
+        url = f"{settings.base_url.rstrip('/')}/?table={code}"
         await message.answer(
-            "Тебя ждут за игровым столом 🂠\n\n"
-            "Жми кнопку ниже — откроется клуб прямо в этом столе "
-            "(в фазе M1 пока показывается профиль и факт приглашения).",
-            reply_markup=open_club_keyboard(),
+            "Тебя ждут за игровым столом 🂠\n\nЖми кнопку — сядешь за него.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🂡 Сесть за стол",
+                            web_app=WebAppInfo(url=url),
+                        )
+                    ]
+                ]
+            ),
         )
         return
 

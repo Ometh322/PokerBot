@@ -13,6 +13,14 @@ class Settings(BaseSettings):
     # Токен от @BotFather. Пустой — режим «только API» (бот отключён).
     bot_token: str = ""
 
+    # Прокси для доступа к api.telegram.org (http://… или socks5://…),
+    # если API недоступен из сети напрямую. Приоритетнее пиннинга IP.
+    proxy_url: str = ""
+
+    # Пиннинг официального IP для api.telegram.org на случай, когда
+    # локальный DNS отдаёт недоступный адрес. Пустая строка — обычный DNS.
+    telegram_api_ip: str = "149.154.167.220"
+
     # Публичный HTTPS-адрес, по которому доступны Mini App и API.
     # В разработке — адрес туннеля (cloudflared/ngrok), в проде — домен.
     base_url: str = "http://localhost:8000"

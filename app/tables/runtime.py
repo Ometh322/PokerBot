@@ -480,7 +480,7 @@ class TableRuntime:
             return
         self._notified_key = key
         settings = get_settings()
-        url = f"{settings.base_url.rstrip('/')}/#tbl_{self.code}"
+        url = f"{settings.base_url.rstrip('/')}/?table={self.code}"
         await sender.pm(
             user_id,
             f"🎰 Твой ход — раздача #{self.hand_number}, банк {runner.pot_total}.\n"

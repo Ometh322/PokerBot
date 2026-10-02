@@ -19,9 +19,10 @@ BOT_TOKEN = "7000000001:AA-test-token-for-unit-tests"
 
 
 def make_init_data(bot_token: str, params: dict[str, str]) -> str:
-    """Подписывает параметры так же, как это делает Telegram."""
+    """Подписывает параметры так же, как это делает Telegram:
+    секрет = HMAC_SHA256(key='WebAppData', msg=токен)."""
     data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(params.items()))
-    secret = hmac.new(bot_token.encode(), b"WebAppData", hashlib.sha256).digest()
+    secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     digest = hmac.new(secret, data_check_string.encode(), hashlib.sha256).hexdigest()
     return urlencode(list(params.items()) + [("hash", digest)])
 
@@ -51,6 +52,22 @@ class TestValidateInitData:
         )
         tampered = init_data.replace("424242", "111111")
         assert validate_init_data(tampered, BOT_TOKEN) is None
+
+    def test_signature_field_included(self) -> None:
+        # Telegram присылает поле signature (Ed25519) в общем наборе полей —
+        # оно входит в data-check-string как любое другое.
+        init_data = make_init_data(
+            BOT_TOKEN,
+            {
+                "query_id": "AAF14D8qAAAA",
+                "user": user_param(),
+                "signature": "A" * 171,
+                "auth_date": str(int(time.time())),
+            },
+        )
+        pairs = validate_init_data(init_data, BOT_TOKEN)
+        assert pairs is not None
+        assert json.loads(pairs["user"])["id"] == 424242
 
     def test_missing_hash(self) -> None:
         assert validate_init_data("user=x&auth_date=123", BOT_TOKEN) is None

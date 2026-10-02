@@ -37,10 +37,16 @@ def norm_code(code: str) -> str:
 
 
 def invite_link(code: str) -> str:
+    """Ссылка-приглашение.
+
+    Классический deep-link ?start= работает у любого бота (ссылки ?startapp=
+    требуют регистрации Mini App в BotFather и ломаются на BOT_INVALID).
+    Друг открывает бота, жмёт Start и получает кнопку «Сесть за стол».
+    """
     username = bot_info.get_bot_username()
     if username:
-        return f"https://t.me/{username}?startapp=tbl_{code}"
-    return f"{get_settings().base_url.rstrip('/')}/#tbl_{code}"
+        return f"https://t.me/{username}?start=tbl_{code}"
+    return f"{get_settings().base_url.rstrip('/')}/?table={code}"
 
 
 def display_name(user: User) -> str:

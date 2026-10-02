@@ -7,7 +7,9 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
     <title>Покер-клуб</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- Локальная копия официального telegram-web-app.js: CDN telegram.org
+         недоступен из некоторых сетей, а без скрипта Mini App не авторизуется. -->
+    <script src="/telegram-web-app.js?v=1"></script>
   </head>
   <body>
     <div id="root"></div>
