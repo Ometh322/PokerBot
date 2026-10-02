@@ -11,6 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from app.api.app import create_app
+from app.bot import sender
 from app.bot.info import set_bot_username
 from app.bot.router import router as bot_router
 from app.config import get_settings
@@ -44,8 +45,10 @@ async def run() -> None:
     dp = Dispatcher()
     dp.include_router(bot_router)
 
-    # Имя бота нужно для сборки invite-ссылок Mini App (t.me/<bot>?startapp=…).
+    # Имя бота нужно для сборки invite-ссылок Mini App (t.me/<bot>?startapp=…),
+    # сам бот — для уведомлений «твой ход» (см. app.bot.sender).
     set_bot_username((await bot.me()).username)
+    sender.set_bot(bot)
 
     # Снимаем возможный вебхук и стартуем polling вместе с веб-сервером.
     await bot.delete_webhook(drop_pending_updates=True)

@@ -25,6 +25,58 @@ export interface PlayerInfo {
   is_host: boolean
 }
 
+export interface LegalActions {
+  fold: boolean
+  check?: boolean
+  call?: number
+  raise_to?: [number, number]
+}
+
+export interface HandPlayerInfo {
+  user_id: number
+  stack: number
+  bet: number
+  folded: boolean
+  all_in: boolean
+}
+
+export interface HandWinner {
+  user_id: number
+  amount: number
+  hand: string | null
+}
+
+export interface HandResult {
+  type: 'showdown' | 'uncontested'
+  board: string[]
+  pot_total: number
+  pots: { amount: number; eligible: number[] }[]
+  winners: HandWinner[]
+}
+
+export interface HandInfo {
+  number: number
+  street: 'preflop' | 'flop' | 'turn' | 'river' | 'showdown' | 'finished' | null
+  board: string[]
+  pot: number
+  current_bet: number
+  dealer_seat: number | null
+  players: HandPlayerInfo[]
+  to_act: number | null
+  deadline: number | null
+  next_hand_at: number | null
+  waiting: boolean
+  revealed: Record<string, string[]>
+  last_result: HandResult | null
+}
+
+export interface YouInfo {
+  seat: number | null
+  is_host: boolean
+  cards?: string[] | null
+  legal_actions?: LegalActions | null
+}
+
 export interface Snapshot {
   code: string
   name: string
@@ -35,7 +87,8 @@ export interface Snapshot {
   seats_total: number
   created_at: string | null
   players: PlayerInfo[]
-  you: { seat: number | null; is_host: boolean }
+  you: YouInfo
+  hand?: HandInfo | null
 }
 
 export interface TableSummary {

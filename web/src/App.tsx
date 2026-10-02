@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { authenticate, devAuth, type AuthResponse } from './api'
 import Home from './screens/Home'
 import CreateTable from './screens/CreateTable'
-import TableLobby from './screens/TableLobby'
+import TableScreen from './screens/TableScreen'
 import './App.css'
 
 type Phase = 'loading' | 'need-login' | 'ready' | 'error'
@@ -88,7 +88,7 @@ export default function App() {
       )
     case 'table':
       return (
-        <TableLobby
+        <TableScreen
           code={view.code}
           auth={auth}
           onExit={() => setView({ kind: 'home' })}

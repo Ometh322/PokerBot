@@ -10,6 +10,7 @@ from app.api.deps import current_user_id
 from app.config import get_settings
 from app.db import SessionLocal
 from app.tables import service
+from app.tables import runtime as table_runtime
 from app.tables.settings import TableSettings
 
 api_router = APIRouter()
@@ -117,6 +118,10 @@ async def list_tables(user_id: int = Depends(current_user_id)) -> list[dict]:
 
 @api_router.get("/tables/{code}")
 async def get_table(code: str, user_id: int = Depends(current_user_id)) -> dict:
+    # Активная игра: снапшот собирает runtime (живые стеки, карты, действия).
+    runtime = table_runtime.get_runtime(service.norm_code(code))
+    if runtime is not None:
+        return await runtime.build_snapshot(user_id)
     async with SessionLocal() as session:
         table = await service.get_table(session, code)
         if table is None:

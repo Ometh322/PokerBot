@@ -9,6 +9,7 @@ export type TableOutMessage =
   | { type: 'end_game' }
   | { type: 'kick'; user_id: number }
   | { type: 'transfer_host'; user_id: number }
+  | { type: 'action'; action: 'fold' | 'check' | 'call' | 'bet' | 'raise'; amount?: number }
 
 export interface TableSocket {
   send(msg: TableOutMessage): void
