@@ -8,6 +8,7 @@
   --accent: #f2b53b;
   --accent-press: #d99e26;
   --danger: #e26d5a;
+  --ok: #6fd39a;
   --radius: 16px;
 }
 
@@ -45,6 +46,8 @@ body {
   gap: 14px;
 }
 
+/* ── Шапка ─────────────────────────────────────────────── */
+
 .header {
   display: flex;
   align-items: center;
@@ -75,11 +78,25 @@ body {
   font-size: 13px;
 }
 
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 36px;
+}
+
+/* ── Панели и состояния ────────────────────────────────── */
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   padding: 16px;
+}
+
+.section-title {
+  margin: 0 0 12px;
+  font-size: 15px;
 }
 
 .loading {
@@ -112,59 +129,33 @@ body {
   line-height: 1.5;
 }
 
-.user-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.avatar-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--felt);
-  color: #dff0e7;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.user-name {
-  font-weight: 600;
-}
-
-.user-id {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 2px;
-  font-variant-numeric: tabular-nums;
-}
-
-.invite-card .chip {
-  display: inline-block;
-  background: rgba(242, 181, 59, 0.14);
-  color: var(--accent);
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-
-.invite-card p {
-  margin: 0;
-  font-size: 14px;
+.info-banner {
+  border: 1px solid var(--panel-border);
+  background: rgba(30, 92, 64, 0.15);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
-.invite-card code {
-  color: var(--accent);
+.empty-state {
+  text-align: center;
+  color: var(--muted);
 }
+
+.suits {
+  font-size: 18px;
+  letter-spacing: 10px;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 13px;
+}
+
+/* ── Кнопки ────────────────────────────────────────────── */
 
 .btn-primary {
   width: 100%;
@@ -183,6 +174,56 @@ body {
   cursor: default;
 }
 
+.btn-sm {
+  padding: 12px;
+  font-size: 14px;
+}
+
+.btn-secondary {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.btn-danger {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(226, 109, 90, 0.5);
+  background: rgba(226, 109, 90, 0.12);
+  color: #f0a396;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.btn-ghost {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
 .hint {
   margin: 8px 0 0;
   text-align: center;
@@ -190,23 +231,245 @@ body {
   font-size: 12px;
 }
 
-.empty-state {
-  margin-top: 16px;
-  text-align: center;
+/* ── Список столов ─────────────────────────────────────── */
+
+.table-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.table-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  border: 1px solid var(--panel-border);
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  width: 100%;
+  color: var(--text);
+}
+
+.table-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tname {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.tmeta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.arrow {
   color: var(--muted);
 }
 
-.suits {
+/* ── Лобби стола ───────────────────────────────────────── */
+
+.table-name {
+  margin: 0 0 6px;
   font-size: 18px;
-  letter-spacing: 10px;
-  margin-bottom: 6px;
-  display: block;
 }
 
-.empty-state p {
-  margin: 0;
+.settings-line {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.invite-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.invite-row .btn-primary {
+  flex: 1;
+}
+
+.status-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.status-lobby {
+  background: rgba(242, 181, 59, 0.14);
+  color: var(--accent);
+}
+
+.status-active {
+  background: rgba(111, 211, 154, 0.14);
+  color: var(--ok);
+}
+
+.status-finished {
+  background: rgba(143, 167, 155, 0.15);
+  color: var(--muted);
+}
+
+.seat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.seat-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+}
+
+.seat-mine {
+  border-color: var(--accent);
+}
+
+.seat-no {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.seat-name {
+  font-size: 13px;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat-stack {
+  color: var(--accent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seat-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.seat-empty {
+  border: 1px dashed var(--panel-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  padding: 14px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
   font-size: 13px;
 }
+
+.seat-empty:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.avatar-sm {
+  width: 36px;
+  height: 36px;
+}
+
+.avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--felt);
+  color: #dff0e7;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.actions-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Формы ─────────────────────────────────────────────── */
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.form-field label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-field input,
+.form-field select {
+  background: var(--bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 15px;
+  width: 100%;
+}
+
+.form-field select {
+  appearance: none;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.preset-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(242, 181, 59, 0.1);
+}
+
+/* ── Прочее ────────────────────────────────────────────── */
 
 .footer {
   margin-top: auto;

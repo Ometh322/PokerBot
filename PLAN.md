@@ -1,7 +1,7 @@
 # 🃏 PokerBot — покерный клуб в Telegram
 
 **Дизайн-документ и план разработки**
-Версия: 0.1 · Обновлён: 2026-10-02 · Текущая фаза: **M1 — каркас**
+Версия: 0.2 · Обновлён: 2026-10-02 · Фаза **M2 завершена**, следующая — **M3 — движок раздачи**
 
 ---
 
@@ -208,31 +208,45 @@ PokerBot/
   app/
     main.py           # точка входа: бот + сервер в одном процессе
     config.py         # настройки из окружения/.env
+    db.py             # движок/сессии SQLAlchemy (aiosqlite)
     bot/
       router.py       # /start, deep links (aiogram)
+      info.py         # кэш имени бота для invite-ссылок
     api/
-      app.py          # FastAPI: REST, статика Mini App
+      app.py          # FastAPI: REST, WS, статика Mini App
       auth.py         # валидация initData, сессионные токены
-      routes.py       # /api/health, /api/auth, далее /api/tables...
+      deps.py         # зависимость current_user_id (Bearer)
+      routes.py       # /api/health, /api/auth, /api/tables...
+      ws.py           # /ws/table/{code}: действия и снапшоты
+    tables/           # домен столов
+      settings.py     # TableSettings (валидация настроек)
+      service.py      # лобби: создание, посадка, роли хоста, снапшоты
+      rooms.py        # WS-комнаты, broadcast персональных снапшотов
     game/             # покерный движок (M3)
-    models/           # SQLAlchemy-модели (M2)
+    models/
+      orm.py          # users, poker_tables, table_players
   web/                # Mini App: React + Vite + TS
     src/
-      App.tsx         # экраны
+      App.tsx         # маршрутизация экранов, дев-вход
       api.ts          # REST-клиент
-  tests/              # pytest: auth, api, далее движок
+      ws.ts           # WS-клиент с переподключением
+      types.ts        # зеркала снапшотов
+      screens/        # Home, CreateTable, TableLobby
+  tests/              # pytest: auth, api, settings, сервис лобби
   PLAN.md             # этот документ
   README.md           # быстрый старт
 ```
 
 ---
 
-## 8. Модель данных (M2)
+## 8. Модель данных
+
+Реализованы в M2: `users`, `poker_tables`, `table_players`. Руки и ledger — в M3/M4.
 
 | Таблица | Поля | Назначение |
 |---|---|---|
-| `users` | tg_id PK, first_name, username, photo_url, created_at, last_seen_at | профиль из Telegram |
-| `tables` | code PK (`tbl_7f3k`), name, host_user_id, status (lobby/active/finished), settings_json, created_at, finished_at | стол и его настройки |
+| `users` | tg_id PK, first_name, last_name, username, photo_url, created_at, last_seen_at | профиль из Telegram (обновляется при каждом входе) |
+| `poker_tables` | code PK (`tbl_7f3k` → код `7f3k`), name, host_user_id, status (lobby/active/finished), settings_json, created_at, finished_at | стол и его настройки |
 | `table_players` | table_id, user_id, seat 0–8, status (waiting/playing/sitting_out/left), stack, total_bought, joined_at, left_at | участник стола; PK (table_id, user_id) |
 | `hands` | id, table_id, number, dealer_seat, board_json, pot_total, result_json, created_at, finished_at | история раздач |
 | `hand_players` | hand_id, user_id, seat, hole_cards_json, start_stack, end_stack, contributed, folded, showed | вклад участников в раздачу |
@@ -245,28 +259,31 @@ PokerBot/
 
 ## 9. API
 
-### REST (M1 частично, далее M2+)
+### REST
 
 | Метод | Путь | Что делает |
 |---|---|---|
 | GET | `/api/health` | живость (M1 ✅) |
 | POST | `/api/auth` | initData → пользователь + сессионный токен (M1 ✅) |
-| GET | `/api/tables` | мои столы (M2) |
-| POST | `/api/tables` | создать стол с настройками (M2) |
-| GET | `/api/tables/{code}` | снапшот состояния стола (M2) |
+| POST | `/api/auth/dev` | дев-вход тестовым игроком, только при `DEV_MODE=1` (M2 ✅) |
+| GET | `/api/tables` | мои столы (M2 ✅) |
+| POST | `/api/tables` | создать стол с настройками (M2 ✅) |
+| GET | `/api/tables/{code}` | снапшот состояния стола (M2 ✅) |
 
-### WebSocket `/ws/table/{code}` (M2–M3)
+### WebSocket `/ws/table/{code}?token=…` (M2 ✅, действия игры — в M3)
 
 Клиент → сервер:
 
 ```jsonc
-{ "type": "action", "action": "fold|check|call|bet|raise", "amount": 40 }
 { "type": "sit", "seat": 3 }
 { "type": "stand_up" }
-{ "type": "rebuy" }
-{ "type": "start_game" }          // хост
-{ "type": "end_game" }            // хост
+{ "type": "start_game" }               // хост, нужно 2+ игроков
+{ "type": "end_game" }                 // хост
+{ "type": "kick", "user_id": 12 }      // хост, только в лобби
+{ "type": "transfer_host", "user_id": 12 }
 { "type": "ping" }
+// В M3 добавятся: { "type": "action", "action": "fold|check|call|bet|raise", "amount": 40 }
+// В M4 добавится: { "type": "rebuy" }
 ```
 
 Сервер → клиент:
@@ -408,6 +425,8 @@ Mini App требует публичный **HTTPS**: `cloudflared tunnel --url 
 | `BOT_TOKEN` | для бота | токен от @BotFather; без него режим «только API» |
 | `BASE_URL` | да | публичный HTTPS-адрес Mini App/API |
 | `HOST` / `PORT` | нет | слушающий адрес, дефолт `0.0.0.0:8000` |
+| `DATABASE_URL` | нет | дефолт `sqlite+aiosqlite:///./pokerbot.db` |
+| `DEV_MODE` | нет | `1` — разрешён дев-вход без Telegram (только для разработки) |
 
 ---
 
@@ -424,12 +443,13 @@ Mini App требует публичный **HTTPS**: `cloudflared tunnel --url 
 
 **Критерий приёмки:** в Telegram открывается апп, показывает имя/аватар; `pytest` зелёный; `npm run build` зелёный.
 
-### M2 — лобби и столы
-- [ ] SQLite + SQLAlchemy (async), модели из §8
-- [ ] Создание стола с формой настроек, «Мои столы»
-- [ ] Лобби: места, состав, приглашение (share + deep links), вход/выход
-- [ ] WebSocket-комнаты, снапшоты, авторизация по сессионному токену
-- [ ] Роль хоста: старт, кик, передача
+### M2 — лобби и столы ✅
+- [x] SQLite + SQLAlchemy (async), модели из §8
+- [x] Создание стола с формой настроек, «Мои столы»
+- [x] Лобби: места, состав, приглашение (share + deep links), вход/выход
+- [x] WebSocket-комнаты, персональные снапшоты, авторизация по сессионному токену
+- [x] Роль хоста: старт, кик, передача (+ авто-передача при выходе хоста)
+- [x] Дев-вход без Telegram (`DEV_MODE=1`) — верстка лобби в браузере несколькими игроками
 
 **Критерий:** 3+ игрока в разных клиентах видят синхронный лобби; стол стартует кнопкой хоста.
 
@@ -473,3 +493,4 @@ Mini App требует публичный **HTTPS**: `cloudflared tunnel --url 
 | Версия | Дата | Что изменилось |
 |---|---|---|
 | 0.1 | 2026-10-02 | Первая редакция: концепция, архитектура, план M1–M5. Реализована фаза M1. |
+| 0.2 | 2026-10-02 | Реализована фаза M2: БД, лобби, приглашения, WS-комнаты, роли хоста, дев-вход. |

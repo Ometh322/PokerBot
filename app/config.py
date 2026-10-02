@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
+    # SQLite через aiosqlite; схема рассчитана на переезд на Postgres.
+    database_url: str = "sqlite+aiosqlite:///./pokerbot.db"
+
+    # Дев-вход без Telegram (POST /api/auth/dev) — только для разработки.
+    dev_mode: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

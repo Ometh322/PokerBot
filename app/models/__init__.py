@@ -1,2 +1,5 @@
-"""Модели хранения (SQLAlchemy). Появятся в фазе M2 вместе с лобби и столами
-(схема — PLAN.md, раздел 8)."""
+"""Модели хранения: ORM (SQLAlchemy)."""
+
+from app.models.orm import Base, PokerTable, TablePlayer, User
+
+__all__ = ["Base", "PokerTable", "TablePlayer", "User"]

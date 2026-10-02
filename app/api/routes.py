@@ -1,18 +1,32 @@
-"""REST-маршруты API. В M1: health + авторизация Mini App."""
+"""REST-маршруты API: health, авторизация, столы."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from app.api.auth import issue_session_token, parse_user, validate_init_data
+from app.api.deps import current_user_id
 from app.config import get_settings
+from app.db import SessionLocal
+from app.tables import service
+from app.tables.settings import TableSettings
 
 api_router = APIRouter()
 
 
 class AuthRequest(BaseModel):
     init_data: str
+
+
+class DevAuthRequest(BaseModel):
+    user_id: int = Field(default=999_123, ge=1, le=1_000_000_000)
+    first_name: str = Field(default="Гость", max_length=64)
+
+
+class CreateTableRequest(BaseModel):
+    name: str = Field(default="", max_length=64)
+    settings: TableSettings = TableSettings()
 
 
 @api_router.get("/health")
@@ -31,6 +45,18 @@ async def auth(body: AuthRequest) -> dict:
     if user is None:
         raise HTTPException(status_code=401, detail="no user in init data")
 
+    # Профиль обновляем при каждом входе — имя/аватар из Telegram актуальны.
+    async with SessionLocal() as session:
+        await service.upsert_user(
+            session,
+            user_id=user["id"],
+            first_name=str(user.get("first_name") or ""),
+            last_name=user.get("last_name"),
+            username=user.get("username"),
+            photo_url=user.get("photo_url"),
+        )
+        await session.commit()
+
     return {
         "user": {
             "id": user["id"],
@@ -42,3 +68,57 @@ async def auth(body: AuthRequest) -> dict:
         "token": issue_session_token(user["id"], settings.bot_token),
         "start_param": pairs.get("start_param"),
     }
+
+
+@api_router.post("/auth/dev")
+async def auth_dev(body: DevAuthRequest) -> dict:
+    """Вход тестовым игроком без Telegram. Доступен только при DEV_MODE=1."""
+    settings = get_settings()
+    if not settings.dev_mode:
+        raise HTTPException(status_code=404, detail="not found")
+    async with SessionLocal() as session:
+        await service.upsert_user(session, user_id=body.user_id, first_name=body.first_name)
+        await session.commit()
+    return {
+        "user": {
+            "id": body.user_id,
+            "first_name": body.first_name,
+            "last_name": None,
+            "username": None,
+            "photo_url": None,
+        },
+        "token": issue_session_token(body.user_id, settings.bot_token),
+        "start_param": None,
+    }
+
+
+@api_router.post("/tables", status_code=201)
+async def create_table(
+    body: CreateTableRequest, user_id: int = Depends(current_user_id)
+) -> dict:
+    async with SessionLocal() as session:
+        table = await service.create_table(
+            session, host_id=user_id, name=body.name, settings=body.settings
+        )
+        await session.commit()
+        snapshot = await service.build_snapshot(session, table, user_id)
+    return {
+        "code": table.code,
+        "invite_link": service.invite_link(table.code),
+        "snapshot": snapshot,
+    }
+
+
+@api_router.get("/tables")
+async def list_tables(user_id: int = Depends(current_user_id)) -> list[dict]:
+    async with SessionLocal() as session:
+        return await service.list_for_user(session, user_id)
+
+
+@api_router.get("/tables/{code}")
+async def get_table(code: str, user_id: int = Depends(current_user_id)) -> dict:
+    async with SessionLocal() as session:
+        table = await service.get_table(session, code)
+        if table is None:
+            raise HTTPException(status_code=404, detail="стол не найден")
+        return await service.build_snapshot(session, table, user_id)
