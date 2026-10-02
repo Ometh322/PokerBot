@@ -19,6 +19,7 @@ from app.api.auth import verify_session_token
 from app.config import get_settings
 from app.db import SessionLocal
 from app.tables import service
+from app.tables import settlement
 from app.tables.rooms import room_manager
 from app.tables.runtime import (
     broadcast_state,
@@ -137,6 +138,11 @@ async def _apply(user_id: int, code: str, message: dict) -> None:
     if ended:
         await stop_runtime(code)
         await broadcast_state(code)
+        # Сводка сессии каждому участнику ботом в личку.
+        async with SessionLocal() as session:
+            table = await service.get_table(session, code)
+            if table is not None:
+                await settlement.notify_table_finished(session, table)
         return
     await broadcast_state(code)
 

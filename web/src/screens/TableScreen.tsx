@@ -2,10 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchTable, type AuthResponse } from '../api'
 import { connectTableSocket, type TableOutMessage, type TableSocket } from '../ws'
 import { chipLabel, rebuyLabel, statusLabel } from '../ui'
+import { playDeal, playTurn, playWin, soundEnabled, toggleSound } from '../sound'
 import type { PlayerInfo, Snapshot } from '../types'
 import PlayingCard from '../components/PlayingCard'
 import SeatView from '../components/SeatView'
 import ActionBar from '../components/ActionBar'
+import Settlement from '../components/Settlement'
+import HandHistory from '../components/HandHistory'
 
 const tg = window.Telegram?.WebApp
 
@@ -20,6 +23,7 @@ export default function TableScreen({ code, auth, onExit }: Props) {
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
   const [now, setNow] = useState(() => Date.now() / 1000)
+  const [soundOn, setSoundOn] = useState(() => soundEnabled())
   const sockRef = useRef<TableSocket | null>(null)
 
   useEffect(() => {
@@ -44,6 +48,26 @@ export default function TableScreen({ code, auth, onExit }: Props) {
     const timer = window.setInterval(() => setNow(Date.now() / 1000), 500)
     return () => window.clearInterval(timer)
   }, [live, hand?.next_hand_at])
+
+  // Звуки и хаптика: новая карта на борде, мой ход, победа в раздаче.
+  const boardLen = hand?.board.length ?? 0
+  useEffect(() => {
+    if (boardLen > 0) playDeal()
+  }, [boardLen])
+
+  const myTurn = Boolean(snap?.you.legal_actions)
+  useEffect(() => {
+    if (myTurn) playTurn()
+  }, [myTurn])
+
+  const lastResult = hand?.last_result ?? null
+  useEffect(() => {
+    if (!lastResult) return
+    if (lastResult.winners.some((w) => w.user_id === auth.user.id)) {
+      playWin()
+      tg?.HapticFeedback?.notificationOccurred('success')
+    }
+  }, [lastResult, auth.user.id])
 
   const send = (msg: TableOutMessage) => {
     tg?.HapticFeedback?.impactOccurred('light')
@@ -107,7 +131,19 @@ export default function TableScreen({ code, auth, onExit }: Props) {
         <button className="btn-ghost" onClick={onExit}>
           ← Мои столы
         </button>
-        <span className={`status-chip status-${snap.status}`}>{statusLabel(snap.status)}</span>
+        <div className="topbar-right">
+          <button
+            className="btn-ghost"
+            onClick={() => {
+              toggleSound()
+              setSoundOn(soundEnabled())
+            }}
+            title="Звуки"
+          >
+            {soundOn ? '🔊' : '🔇'}
+          </button>
+          <span className={`status-chip status-${snap.status}`}>{statusLabel(snap.status)}</span>
+        </div>
       </div>
 
       <div className="table-line">
@@ -219,7 +255,7 @@ export default function TableScreen({ code, auth, onExit }: Props) {
         <>
           <div className="felt-area">
             <div className="felt">
-              <div className="pot-label">
+              <div className="pot-label" key={hand.pot}>
                 {live ? `Банк ${hand.pot}` : `Раздача #${hand.number}`}
               </div>
               <div className="board">
@@ -265,6 +301,10 @@ export default function TableScreen({ code, auth, onExit }: Props) {
               const angle = Math.PI / 2 + (2 * Math.PI * shifted) / seats.length
               const x = 50 + 45 * Math.cos(angle)
               const y = 50 + 43 * Math.sin(angle)
+              const isWinner = Boolean(
+                !live &&
+                  hand.last_result?.winners.some((w) => w.user_id === player.user_id),
+              )
               return (
                 <div
                   key={seat}
@@ -279,6 +319,7 @@ export default function TableScreen({ code, auth, onExit }: Props) {
                     timeFrac={timeFrac}
                     revealedCards={revealed}
                     isMe={player.user_id === auth.user.id}
+                    isWinner={isWinner}
                   />
                 </div>
               )
@@ -358,15 +399,15 @@ export default function TableScreen({ code, auth, onExit }: Props) {
         </>
       )}
 
+      {snap.status !== 'lobby' && <HandHistory code={snap.code} token={auth.token} />}
+
       {snap.status === 'finished' && (
-        <section className="panel actions-panel">
-          <div className="info-banner">
-            🏁 Сессия завершена. Расчёт долгов появится в фазе M5.
-          </div>
+        <>
+          <Settlement code={snap.code} token={auth.token} />
           <button className="btn-secondary" onClick={onExit}>
             ← На главную
           </button>
-        </section>
+        </>
       )}
     </div>
   )

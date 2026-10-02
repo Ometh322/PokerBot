@@ -11,6 +11,7 @@ interface Props {
   timeFrac: number | null // 0..1 остаток таймера
   revealedCards?: string[]
   isMe: boolean
+  isWinner?: boolean
 }
 
 export default function SeatView({
@@ -21,15 +22,21 @@ export default function SeatView({
   timeFrac,
   revealedCards,
   isMe,
+  isWinner,
 }: Props) {
   const folded = hand?.folded ?? false
   const ringStyle =
     isToAct && timeFrac !== null
       ? ({ '--frac': String(timeFrac) } as React.CSSProperties)
       : undefined
+  const stack = hand ? hand.stack : player.stack
 
   return (
-    <div className={`seat ${folded ? 'seat-folded' : ''} ${isToAct ? 'seat-active' : ''}`}>
+    <div
+      className={`seat ${folded ? 'seat-folded' : ''} ${isToAct ? 'seat-active' : ''} ${
+        isWinner ? 'seat-winner' : ''
+      }`}
+    >
       {isDealer && <span className="badge badge-d">D</span>}
       <div
         className={`avatar-ring ${isToAct && timeFrac !== null ? 'ring-timer' : ''} ${
@@ -48,7 +55,9 @@ export default function SeatView({
       <div className="seat-name" title={player.name}>
         {isMe ? 'Ты' : player.name}
       </div>
-      <div className="seat-stack">{hand ? hand.stack : player.stack}</div>
+      <div className="seat-stack" key={stack}>
+        {stack}
+      </div>
       {hand && hand.bet > 0 && <div className="bet-chip">💰 {hand.bet}</div>}
       {hand?.all_in && <div className="allin-tag">ALL IN</div>}
       {revealedCards && revealedCards.length > 0 && (

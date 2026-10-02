@@ -1,6 +1,6 @@
 // REST-клиент Mini App.
 
-import type { Snapshot, TableSettings, TableSummary } from './types'
+import type { HandSummary, Settlement, Snapshot, TableSettings, TableSummary } from './types'
 
 export interface AuthUser {
   id: number
@@ -74,4 +74,16 @@ export function createTable(
 
 export function fetchTable(token: string, code: string): Promise<Snapshot> {
   return request<Snapshot>(`/api/tables/${code}`, 'GET', token)
+}
+
+export function fetchSettlement(token: string, code: string): Promise<Settlement> {
+  return request<Settlement>(`/api/tables/${code}/settlement`, 'GET', token)
+}
+
+export function fetchHands(
+  token: string,
+  code: string,
+  limit = 20,
+): Promise<HandSummary[]> {
+  return request<HandSummary[]>(`/api/tables/${code}/hands?limit=${limit}`, 'GET', token)
 }

@@ -12,9 +12,10 @@ from app.api.auth import issue_session_token, parse_user, validate_init_data
 from app.api.deps import current_user_id
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models.orm import Hand
+from app.models.orm import Hand, User
 from app.tables import service
 from app.tables import runtime as table_runtime
+from app.tables import settlement as table_settlement
 from app.tables.settings import TableSettings
 
 api_router = APIRouter()
@@ -124,7 +125,7 @@ async def list_tables(user_id: int = Depends(current_user_id)) -> list[dict]:
 async def get_table_hands(
     code: str, user_id: int = Depends(current_user_id), limit: int = 20
 ) -> list[dict]:
-    """История раздач: вскрытые карты не раскрываются (только showed в БД)."""
+    """История раздач; имена победителей подтягиваются из профилей."""
     code = service.norm_code(code)
     limit = max(1, min(limit, 50))
     async with SessionLocal() as session:
@@ -136,17 +137,42 @@ async def get_table_hands(
                 .limit(limit)
             )
         ).scalars().all()
+        results = [(hand, json.loads(hand.result_json)) for hand in rows]
+        uids = {w["user_id"] for _, winners in results for w in winners}
+        names: dict[int, str] = {}
+        if uids:
+            users = (
+                await session.execute(select(User).where(User.tg_id.in_(uids)))
+            ).scalars().all()
+            names = {u.tg_id: service.display_name(u) for u in users}
         return [
             {
                 "number": hand.number,
                 "dealer_seat": hand.dealer_seat,
                 "board": json.loads(hand.board_json),
                 "pot_total": hand.pot_total,
-                "winners": json.loads(hand.result_json),
+                "winners": [
+                    {**w, "name": names.get(w["user_id"], f"Игрок {w['user_id']}")}
+                    for w in winners
+                ],
                 "created_at": hand.created_at.isoformat() if hand.created_at else None,
             }
-            for hand in rows
+            for hand, winners in results
         ]
+
+
+@api_router.get("/tables/{code}/settlement")
+async def get_settlement(code: str, user_id: int = Depends(current_user_id)) -> dict:
+    """Расчёт долгов — после завершения игры."""
+    async with SessionLocal() as session:
+        table = await service.get_table(session, code)
+        if table is None:
+            raise HTTPException(status_code=404, detail="стол не найден")
+        if table.status != "finished":
+            raise HTTPException(
+                status_code=400, detail="расчёт доступен после завершения игры"
+            )
+        return await table_settlement.build_settlement(session, table)
 
 
 @api_router.get("/tables/{code}")

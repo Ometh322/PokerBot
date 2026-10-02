@@ -35,6 +35,7 @@ from app.models.orm import (
     utcnow,
 )
 from app.tables import service
+from app.tables import settlement
 from app.tables.rooms import room_manager
 from app.tables.service import TableError
 from app.tables.settings import TableSettings
@@ -295,6 +296,7 @@ class TableRuntime:
             p for p in self.players if not p.left and p.user_id != leaving_user_id
         ]
         remaining.sort(key=lambda p: p.seat)
+        finished_now = False
         async with SessionLocal() as session:
             table = await service.get_table(session, self.code)
             if table is None:
@@ -306,7 +308,14 @@ class TableRuntime:
                 table.status = "finished"
                 table.finished_at = utcnow()
                 self._stopped = True
+                finished_now = True
             await session.commit()
+        if finished_now:
+            # Стол опустел — тоже шлём сводку по итогам сессии.
+            async with SessionLocal() as session:
+                fresh = await service.get_table(session, self.code)
+                if fresh is not None:
+                    await settlement.notify_table_finished(session, fresh)
 
     # ── Внутреннее: ход раздачи ──────────────────────────────
 

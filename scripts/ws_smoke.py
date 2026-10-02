@@ -114,7 +114,20 @@ async def main() -> None:
                 await asyncio.sleep(1)
                 await anya.ws.send(json.dumps({"type": "end_game"}))
                 await asyncio.sleep(1)
-                print("SMOKE OK: раздача, поздний вход, история, завершение")
+
+                # Расчёт долгов по финальному ledger.
+                async with httpx.AsyncClient(
+                    base_url=BASE, headers={"Authorization": f"Bearer {tokens[101]}"}
+                ) as http:
+                    res = await http.get(f"/api/tables/{code}/settlement")
+                    res.raise_for_status()
+                    s = res.json()
+                nets = {p["user_id"]: p["net_chips"] for p in s["players"]}
+                print(f"итоги в фишках: {nets}, переводов: {len(s['transfers'])}")
+                assert sum(nets.values()) == 0, "итоги не сходятся в ноль"
+                assert len(s["transfers"]) >= 1, "переводы не рассчитаны"
+
+                print("SMOKE OK: раздача, поздний вход, история, расчёт, завершение")
                 for player_ in (anya, borya, vasya):
                     await player_.ws.close()
                 return

@@ -101,3 +101,41 @@ export interface TableSummary {
   my_seat: number | null
   is_host: boolean
 }
+
+export interface SettlementPlayer {
+  user_id: number
+  name: string
+  bought: number
+  cashed_out: number
+  net_chips: number
+  net_cents: number
+}
+
+export interface Transfer {
+  from_user_id: number
+  to_user_id: number
+  cents: number
+}
+
+export interface Settlement {
+  table: {
+    code: string
+    name: string
+    chip_value: number
+    created_at: string | null
+    finished_at: string | null
+    duration: string
+  }
+  hands_played: number
+  players: SettlementPlayer[]
+  transfers: Transfer[]
+}
+
+export interface HandSummary {
+  number: number
+  dealer_seat: number | null
+  board: string[]
+  pot_total: number
+  winners: (HandWinner & { name: string })[]
+  created_at: string | null
+}
