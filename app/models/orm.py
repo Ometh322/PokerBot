@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -55,9 +55,63 @@ class TablePlayer(Base):
         BigInteger, ForeignKey("users.tg_id"), primary_key=True
     )
     seat: Mapped[int] = mapped_column(Integer)
-    # waiting | left (в M3 появятся playing / sitting_out)
+    # waiting | left
     status: Mapped[str] = mapped_column(String(16), default="waiting")
     stack: Mapped[int] = mapped_column(Integer, default=0)
     total_bought: Mapped[int] = mapped_column(Integer, default=0)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LedgerEntry(Base):
+    """Движение фишек за сессию: buyin / rebuy на вход, cashout на выход.
+
+    Инвариант закрытого стола: сумма buyin+rebuy равна сумме cashout.
+    """
+
+    __tablename__ = "ledger_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    table_code: Mapped[str] = mapped_column(
+        String(8), ForeignKey("poker_tables.code"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(16))  # buyin | rebuy | cashout
+    chips: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Hand(Base):
+    """История раздачи: борд, банк, победители (для разбора и статистики)."""
+
+    __tablename__ = "hands"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    table_code: Mapped[str] = mapped_column(
+        String(8), ForeignKey("poker_tables.code"), index=True
+    )
+    number: Mapped[int] = mapped_column(Integer)
+    dealer_seat: Mapped[int | None] = mapped_column(Integer)
+    board_json: Mapped[str] = mapped_column(Text)
+    pot_total: Mapped[int] = mapped_column(Integer)
+    result_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class HandPlayerRow(Base):
+    """Участник раздачи: карты (хранятся, наружу отдаются только showed)."""
+
+    __tablename__ = "hand_players"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hand_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("hands.id"), index=True
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    seat: Mapped[int | None] = mapped_column(Integer)
+    hole_cards_json: Mapped[str] = mapped_column(Text)
+    start_stack: Mapped[int] = mapped_column(Integer)
+    end_stack: Mapped[int] = mapped_column(Integer)
+    contributed: Mapped[int] = mapped_column(Integer)
+    folded: Mapped[bool] = mapped_column(Boolean, default=False)
+    showed: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -46,7 +46,7 @@ async def main() -> None:
 
     async with httpx.AsyncClient(base_url=BASE) as http:
         tokens = {}
-        for uid, name in ((101, "Аня"), (102, "Боря")):
+        for uid, name in ((101, "Аня"), (102, "Боря"), (103, "Вася")):
             res = await http.post(
                 "/api/auth/dev", json={"user_id": uid, "first_name": name}
             )
@@ -56,7 +56,7 @@ async def main() -> None:
         res = await http.post(
             "/api/tables",
             headers=headers,
-            json={"name": "Смоук M3", "settings": {"action_timeout": 10}},
+            json={"name": "Смоук M4", "settings": {"action_timeout": 10}},
         )
         res.raise_for_status()
         code = res.json()["code"]
@@ -90,11 +90,32 @@ async def main() -> None:
                     f"раздача завершена (банк {result.get('pot_total')}): "
                     f"{result['winners']}"
                 )
+
+                # Поздний вход: третий игрок садится между раздачами.
+                vasya = Player("Вася", tokens[103])
+                await vasya.connect(code)
+                await asyncio.sleep(0.5)
+                await vasya.ws.send(json.dumps({"type": "sit", "seat": 5}))
+                await asyncio.sleep(0.5)
+                players = anya.snapshot["players"] if anya.snapshot else []
+                print(f"игроков за столом: {len(players)}")
+                assert len(players) == 3, "поздний вход не сработал"
+
+                # История рук доступна по REST.
+                async with httpx.AsyncClient(
+                    base_url=BASE, headers={"Authorization": f"Bearer {tokens[101]}"}
+                ) as http:
+                    res = await http.get(f"/api/tables/{code}/hands")
+                    res.raise_for_status()
+                    hands = res.json()
+                print(f"история рук: {len(hands)} записей, банк {hands[0]['pot_total']}")
+                assert len(hands) >= 1
+
                 await asyncio.sleep(1)
                 await anya.ws.send(json.dumps({"type": "end_game"}))
                 await asyncio.sleep(1)
-                print("SMOKE OK: раздача сыграна от и до, стол завершён")
-                for player_ in (anya, borya):
+                print("SMOKE OK: раздача, поздний вход, история, завершение")
+                for player_ in (anya, borya, vasya):
                     await player_.ws.close()
                 return
 

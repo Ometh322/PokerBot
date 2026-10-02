@@ -1,14 +1,18 @@
-"""REST-маршруты API: health, авторизация, столы."""
+"""REST-маршруты API: health, авторизация, столы, история рук."""
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.api.auth import issue_session_token, parse_user, validate_init_data
 from app.api.deps import current_user_id
 from app.config import get_settings
 from app.db import SessionLocal
+from app.models.orm import Hand
 from app.tables import service
 from app.tables import runtime as table_runtime
 from app.tables.settings import TableSettings
@@ -114,6 +118,35 @@ async def create_table(
 async def list_tables(user_id: int = Depends(current_user_id)) -> list[dict]:
     async with SessionLocal() as session:
         return await service.list_for_user(session, user_id)
+
+
+@api_router.get("/tables/{code}/hands")
+async def get_table_hands(
+    code: str, user_id: int = Depends(current_user_id), limit: int = 20
+) -> list[dict]:
+    """История раздач: вскрытые карты не раскрываются (только showed в БД)."""
+    code = service.norm_code(code)
+    limit = max(1, min(limit, 50))
+    async with SessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(Hand)
+                .where(Hand.table_code == code)
+                .order_by(Hand.id.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+        return [
+            {
+                "number": hand.number,
+                "dealer_seat": hand.dealer_seat,
+                "board": json.loads(hand.board_json),
+                "pot_total": hand.pot_total,
+                "winners": json.loads(hand.result_json),
+                "created_at": hand.created_at.isoformat() if hand.created_at else None,
+            }
+            for hand in rows
+        ]
 
 
 @api_router.get("/tables/{code}")

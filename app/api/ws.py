@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 ws_router = APIRouter()
 
-LOBBY_ACTIONS = {"sit", "kick", "transfer_host", "start_game", "end_game"}
+LOBBY_ACTIONS = {"kick", "transfer_host", "start_game", "end_game"}
 GAME_ACTIONS = {"fold", "check", "call", "bet", "raise"}
 
 
@@ -62,6 +62,29 @@ async def _apply(user_id: int, code: str, message: dict) -> None:
             raise TableError("размер должен быть целым числом")
         await runtime.act(user_id, str(action), amount)
         return  # runtime сам рассылает снапшоты
+
+    if mtype == "rebuy":
+        runtime = get_runtime(code)
+        if runtime is None:
+            raise TableError("сейчас нет активной игры")
+        await runtime.rebuy(user_id)
+        return
+
+    if mtype == "sit":
+        runtime = get_runtime(code)
+        if runtime is not None:
+            # Активная игра: поздний вход обрабатывает runtime.
+            await runtime.sit(user_id, _int_field(message, "seat"))
+            return
+        async with room_manager.get_room(code).lock:
+            async with SessionLocal() as session:
+                table = await service.get_table(session, code)
+                if table is None:
+                    raise TableError("стол не найден", status=404)
+                await service.sit(session, table, user_id, _int_field(message, "seat"))
+                await session.commit()
+        await broadcast_state(code)
+        return
 
     if mtype == "stand_up":
         runtime = get_runtime(code)

@@ -14,6 +14,7 @@ runtime сами берут лок, вызывающим из WS вкладыв�
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -24,7 +25,15 @@ from app.bot import sender
 from app.config import get_settings
 from app.db import SessionLocal
 from app.game.hand import EngineError, HandPlayer, HandRunner
-from app.models.orm import PokerTable, TablePlayer, User, utcnow
+from app.models.orm import (
+    Hand,
+    HandPlayerRow,
+    LedgerEntry,
+    PokerTable,
+    TablePlayer,
+    User,
+    utcnow,
+)
 from app.tables import service
 from app.tables.rooms import room_manager
 from app.tables.service import TableError
@@ -65,6 +74,7 @@ class TableRuntime:
         self._stopped = False
         self._tasks: set[asyncio.Task] = set()
         self._notified_key: tuple | None = None
+        self._hand_start: dict[int, int] = {}
 
     # ── Загрузка и lifecycle ─────────────────────────────────
 
@@ -143,15 +153,25 @@ class TableRuntime:
             await self._post_action_locked()
 
     async def stand_up(self, user_id: int) -> None:
-        """Выход из-за стола в активной игре — только между раздачами."""
+        """Выход из-за стола в активной игре — между раздачами; стек = кэшаут."""
         async with self.lock():
             if self.runner is not None:
                 raise TableError("дождись конца раздачи, чтобы встать")
             player = next((p for p in self.players if p.user_id == user_id), None)
             if player is None or player.left:
                 raise TableError("ты не за столом")
+            cashout = player.stack
             player.left = True
             async with SessionLocal() as session:
+                if cashout > 0:
+                    session.add(
+                        LedgerEntry(
+                            table_code=self.code,
+                            user_id=user_id,
+                            kind="cashout",
+                            chips=cashout,
+                        )
+                    )
                 await session.execute(
                     update(TablePlayer)
                     .where(
@@ -162,6 +182,111 @@ class TableRuntime:
                 )
                 await session.commit()
             await self._reassign_host_after_leave(user_id)
+            await broadcast_state(self.code)
+
+    async def rebuy(self, user_id: int) -> None:
+        """Ребай стартовым стеком по режиму настроек, между раздачами."""
+        async with self.lock():
+            if self.runner is not None:
+                raise TableError("ребай — только между раздачами")
+            player = next((p for p in self.players if p.user_id == user_id), None)
+            if player is None or player.left:
+                raise TableError("ты не за столом")
+            mode = self.settings.rebuy_mode
+            if mode == "off":
+                raise TableError("ребай выключен настройками стола")
+            if mode == "busted" and player.stack > 0:
+                raise TableError("ребай доступен при стеке 0")
+
+            amount = self.settings.starting_stack
+            player.stack += amount
+            player.total_bought += amount
+            async with SessionLocal() as session:
+                await session.execute(
+                    update(TablePlayer)
+                    .where(
+                        TablePlayer.table_code == self.code,
+                        TablePlayer.user_id == user_id,
+                    )
+                    .values(stack=player.stack, total_bought=player.total_bought)
+                )
+                session.add(
+                    LedgerEntry(
+                        table_code=self.code,
+                        user_id=user_id,
+                        kind="rebuy",
+                        chips=amount,
+                    )
+                )
+                await session.commit()
+            if self.waiting_for_players:
+                self.waiting_for_players = False
+                self.schedule_next_hand(1.0)
+            await broadcast_state(self.code)
+
+    async def sit(self, user_id: int, seat: int) -> None:
+        """Поздний вход в активную игру: стартовый стек, между раздачами."""
+        async with self.lock():
+            if self.runner is not None:
+                raise TableError("дождись конца раздачи, чтобы сесть")
+            if not 0 <= seat < self.settings.max_seats:
+                raise TableError("нет такого места")
+            if any(not p.left and p.seat == seat for p in self.players):
+                raise TableError("место занято")
+            mine = next((p for p in self.players if p.user_id == user_id), None)
+            if mine is not None and not mine.left:
+                raise TableError("ты уже за столом")
+
+            buyin = self.settings.starting_stack
+            async with SessionLocal() as session:
+                user = await session.get(User, user_id)
+                if user is None:
+                    user = User(tg_id=user_id, first_name=f"Игрок {user_id}")
+                    session.add(user)
+                    await session.flush()
+                if mine is not None:  # вернулся после выхода
+                    mine.left = False
+                    mine.seat = seat
+                    mine.stack = buyin
+                    mine.total_bought += buyin
+                else:
+                    self.players.append(
+                        RuntimePlayer(
+                            user_id=user_id,
+                            name=service.display_name(user),
+                            photo_url=user.photo_url,
+                            seat=seat,
+                            stack=buyin,
+                            total_bought=buyin,
+                        )
+                    )
+                    self.players.sort(key=lambda p: p.seat)
+                row = await session.get(TablePlayer, (self.code, user_id))
+                if row is None:
+                    session.add(
+                        TablePlayer(
+                            table_code=self.code,
+                            user_id=user_id,
+                            seat=seat,
+                            stack=buyin,
+                            total_bought=buyin,
+                        )
+                    )
+                else:
+                    row.seat = seat
+                    row.status = "waiting"
+                    row.left_at = None
+                    row.stack = buyin
+                    row.total_bought += buyin
+                session.add(
+                    LedgerEntry(
+                        table_code=self.code, user_id=user_id, kind="buyin", chips=buyin
+                    )
+                )
+                await session.commit()
+            if self.waiting_for_players:
+                self.waiting_for_players = False
+                self.schedule_next_hand(1.0)
             await broadcast_state(self.code)
 
     async def _reassign_host_after_leave(self, leaving_user_id: int) -> None:
@@ -207,6 +332,7 @@ class TableRuntime:
         )
         self.hand_number += 1
         self.last_result = None
+        self._hand_start = {p.user_id: p.stack for p in eligible}
         self._set_deadline()
         await self._notify_turn_locked()
         await broadcast_state(self.code)
@@ -244,11 +370,49 @@ class TableRuntime:
                 if player.user_id == winner["user_id"]:
                     player.stack += winner["amount"]
 
+        await self._record_hand(result)
         self.last_result = result
         self.runner = None
         self.turn_deadline = None
         await self._persist_stacks()
         self.schedule_next_hand(NEXT_HAND_DELAY)
+
+    async def _record_hand(self, result: dict) -> None:
+        """История рук: борд, банк, победители и вклад каждого игрока.
+
+        Карты хранятся у всех, но наружу (REST) отдаются только вскрытые.
+        """
+        runner = self.runner
+        assert runner is not None
+        seat_by_id = {p.user_id: p.seat for p in self.players}
+        # Стеки уже финализированы вызывающим кодом (выигрыши применены).
+        end_stack = {p.user_id: p.stack for p in self.players}
+        async with SessionLocal() as session:
+            hand_row = Hand(
+                table_code=self.code,
+                number=self.hand_number,
+                dealer_seat=self.button_seat,
+                board_json=json.dumps(result["board"]),
+                pot_total=result["pot_total"],
+                result_json=json.dumps(result["winners"]),
+            )
+            session.add(hand_row)
+            await session.flush()
+            for hp in runner.players:
+                session.add(
+                    HandPlayerRow(
+                        hand_id=hand_row.id,
+                        user_id=hp.user_id,
+                        seat=seat_by_id.get(hp.user_id),
+                        hole_cards_json=json.dumps([c.code for c in hp.cards]),
+                        start_stack=self._hand_start.get(hp.user_id, 0),
+                        end_stack=end_stack.get(hp.user_id, hp.stack),
+                        contributed=hp.total,
+                        folded=hp.folded,
+                        showed=hp.user_id in runner.revealed,
+                    )
+                )
+            await session.commit()
 
     async def _persist_stacks(self) -> None:
         async with SessionLocal() as session:
@@ -353,6 +517,16 @@ class TableRuntime:
                     and runner.players[runner.to_act].user_id == viewer_id
                 ):
                     base["you"]["legal_actions"] = runner.legal_actions()
+
+        # Доступен ли ребай прямо сейчас (между раздачами).
+        me = next(
+            (p for p in self.players if p.user_id == viewer_id and not p.left), None
+        )
+        rebuy_available = False
+        if me is not None and runner is None:
+            mode = self.settings.rebuy_mode
+            rebuy_available = mode == "anytime" or (mode == "busted" and me.stack == 0)
+        base["you"]["rebuy_available"] = rebuy_available
         return base
 
     def hand_view(self) -> dict:

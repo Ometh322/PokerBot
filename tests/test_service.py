@@ -138,7 +138,7 @@ async def test_sit_when_active_rejected(session) -> None:
     await service.sit(session, table, 2, seat=1)
     await service.start_game(session, table, 1)
     await add_user(session, 3)
-    with pytest.raises(TableError, match="M4"):
+    with pytest.raises(TableError, match="между раздачами"):
         await service.sit(session, table, 3, seat=2)
 
 

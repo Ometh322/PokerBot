@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import info as bot_info
 from app.config import get_settings
-from app.models.orm import PokerTable, TablePlayer, User, utcnow
+from app.models.orm import LedgerEntry, PokerTable, TablePlayer, User, utcnow
 from app.tables.settings import TableSettings
 
 # Алфавит без похожих символов (0/O, 1/l/I).
@@ -43,7 +43,7 @@ def invite_link(code: str) -> str:
     return f"{get_settings().base_url.rstrip('/')}/#tbl_{code}"
 
 
-def _display_name(user: User) -> str:
+def display_name(user: User) -> str:
     name = " ".join(p for p in (user.first_name, user.last_name) if p)
     return name or f"Игрок {user.tg_id}"
 
@@ -134,7 +134,8 @@ async def sit(session: AsyncSession, table: PokerTable, user_id: int, seat: int)
     if table.status == "finished":
         raise TableError("стол уже завершён")
     if table.status == "active":
-        raise TableError("стол уже играет — поздний вход подключим в M4")
+        # Активной игрой владеет runtime: поздний вход идёт через него.
+        raise TableError("стол уже играет — сесть можно между раздачами")
     settings = TableSettings.model_validate_json(table.settings_json)
     if not 0 <= seat < settings.max_seats:
         raise TableError("нет такого места")
@@ -231,6 +232,16 @@ async def start_game(session: AsyncSession, table: PokerTable, actor_id: int) ->
     if len(seated) < 2:
         raise TableError("нужно минимум 2 игрока за столом")
     table.status = "active"
+    for player in seated:
+        # Начальный бай-ин каждого участника — в ledger.
+        session.add(
+            LedgerEntry(
+                table_code=table.code,
+                user_id=player.user_id,
+                kind="buyin",
+                chips=player.stack,
+            )
+        )
     await session.flush()
 
 
@@ -241,7 +252,45 @@ async def end_game(session: AsyncSession, table: PokerTable, actor_id: int) -> N
         raise TableError("завершить игру может только хост", status=403)
     table.status = "finished"
     table.finished_at = utcnow()
+    # Финальные кэшауты оставшихся: их стеки покидают игру целиком.
+    # Берём стеки из БД (после последней завершённой раздачи) — если хост
+    # завершил игру посреди раздачи, её ставки откатываются к её началу.
+    for player in await _seated_players(session, table.code):
+        if player.stack > 0:
+            session.add(
+                LedgerEntry(
+                    table_code=table.code,
+                    user_id=player.user_id,
+                    kind="cashout",
+                    chips=player.stack,
+                )
+            )
     await session.flush()
+
+
+async def ledger_summary(session: AsyncSession, table_code: str) -> list[dict[str, Any]]:
+    """Сводка по столу: сколько куплено/выведено и чистый итог в фишках."""
+    rows = (
+        await session.execute(
+            select(LedgerEntry)
+            .where(LedgerEntry.table_code == table_code)
+            .order_by(LedgerEntry.id)
+        )
+    ).scalars().all()
+    summary: dict[int, dict[str, int]] = {}
+    for entry in rows:
+        player = summary.setdefault(
+            entry.user_id, {"bought": 0, "cashed_out": 0}
+        )
+        if entry.kind == "cashout":
+            player["cashed_out"] += entry.chips
+        else:  # buyin | rebuy
+            player["bought"] += entry.chips
+    return [
+        {"user_id": uid, "bought": data["bought"], "cashed_out": data["cashed_out"],
+         "net": data["cashed_out"] - data["bought"]}
+        for uid, data in sorted(summary.items())
+    ]
 
 
 async def build_snapshot(
@@ -259,7 +308,7 @@ async def build_snapshot(
     players = [
         {
             "user_id": player.user_id,
-            "name": _display_name(user),
+            "name": display_name(user),
             "photo_url": user.photo_url,
             "seat": player.seat,
             "stack": player.stack,

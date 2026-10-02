@@ -243,7 +243,7 @@ export default function TableScreen({ code, auth, onExit }: Props) {
               )}
               {hand.waiting && (
                 <div className="waiting-note">
-                  Ждём игроков со стеком — ребай появится в M4
+                  Ждём игроков со стеком: сделай ребай или позови ещё друзей
                 </div>
               )}
             </div>
@@ -285,7 +285,35 @@ export default function TableScreen({ code, auth, onExit }: Props) {
             })}
           </div>
 
+          {snap.status === 'active' && hand && mySeat === null && (
+            <section className="panel">
+              <h3 className="section-title">Присоединиться к игре</h3>
+              <div className="seat-grid">
+                {seats
+                  .filter((seat) => !seatMap.has(seat))
+                  .map((seat) => (
+                    <button
+                      key={seat}
+                      className="seat-empty"
+                      onClick={() => send({ type: 'sit', seat })}
+                    >
+                      <span className="seat-no">#{seat + 1}</span>
+                      <span>Сесть</span>
+                    </button>
+                  ))}
+              </div>
+              <p className="hint">
+                Вход со стартовым стеком {snap.settings.starting_stack}, между раздачами
+              </p>
+            </section>
+          )}
+
           <div className="my-zone">
+            {snap.you.rebuy_available && (
+              <button className="btn-primary" onClick={() => send({ type: 'rebuy' })}>
+                ♻️ Ребай +{snap.settings.starting_stack}
+              </button>
+            )}
             {snap.you.cards && snap.you.cards.length > 0 ? (
               <div className={`my-cards ${(hand.players.find((p) => p.user_id === auth.user.id)?.folded) ? 'my-cards-folded' : ''}`}>
                 {snap.you.cards.map((c) => (

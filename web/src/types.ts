@@ -75,6 +75,7 @@ export interface YouInfo {
   is_host: boolean
   cards?: string[] | null
   legal_actions?: LegalActions | null
+  rebuy_available?: boolean
 }
 
 export interface Snapshot {
