@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Окружение и данные
+.env
+*.db
+*.sqlite3
+
+# Node / Mini App
+node_modules/
+web/dist/
+
+# Системное
+.DS_Store
+Thumbs.db
