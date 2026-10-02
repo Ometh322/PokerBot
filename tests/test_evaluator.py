@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.game.cards import card
-from app.game.evaluator import best_hand, evaluate5, hand_name
+from app.game.evaluator import best_hand, evaluate5, hand_name, preflop_name
 
 
 def cards(codes: str) -> list:
@@ -68,3 +68,10 @@ def test_hand_names() -> None:
     assert hand_name(evaluate5(cards("Ac Ad Kh Ks 2c"))) == "две пары A и K"
     assert hand_name(evaluate5(cards("Ac Ad Kh Qs 2c"))) == "пара A"
     assert hand_name(evaluate5(cards("Ac Jd 9h 6s 2c"))) == "старшая A"
+
+
+def test_preflop_names() -> None:
+    assert preflop_name(cards("Kh Kd")) == "карманная пара K"
+    assert preflop_name(cards("As 2s")) == "A2 одномастные"
+    assert preflop_name(cards("Kc Qh")) == "KQ разномастные"
+    assert preflop_name(cards("Ah")) == ""

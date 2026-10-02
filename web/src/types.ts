@@ -76,6 +76,7 @@ export interface YouInfo {
   cards?: string[] | null
   legal_actions?: LegalActions | null
   rebuy_available?: boolean
+  hand_hint?: string | null
 }
 
 export interface Snapshot {

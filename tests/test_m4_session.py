@@ -145,7 +145,7 @@ class TestHandHistory:
         runner.act(second.user_id, "call")
         assert runner.result is not None
 
-        await rt._finish_hand_locked()
+        await rt._apply_hand_result_locked()
 
         async with maker() as session:
             hands = (await session.execute(select(Hand))).scalars().all()

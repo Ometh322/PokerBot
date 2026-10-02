@@ -82,3 +82,16 @@ def hand_name(score: tuple[int, ...]) -> str:
     if cat == 1:
         return f"пара {label(score[1])}"
     return f"старшая {label(score[1])}"
+
+
+def preflop_name(cards: list[Card]) -> str:
+    """Подсказка для двух карманных карт (до выхода борда)."""
+    if len(cards) != 2:
+        return ""
+    hi, lo = sorted(cards, key=lambda c: c.rank, reverse=True)
+    name_hi, name_lo = RANK_LABELS[hi.rank], RANK_LABELS[lo.rank]
+    if hi.rank == lo.rank:
+        return f"карманная пара {name_hi}"
+    if hi.suit == lo.suit:
+        return f"{name_hi}{name_lo} одномастные"
+    return f"{name_hi}{name_lo} разномастные"

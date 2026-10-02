@@ -24,6 +24,8 @@ from sqlalchemy import select, update
 from app.bot import sender
 from app.config import get_settings
 from app.db import SessionLocal
+from app.game.cards import card as card_from_code
+from app.game.evaluator import best_hand, hand_name, preflop_name
 from app.game.hand import EngineError, HandPlayer, HandRunner
 from app.models.orm import (
     Hand,
@@ -45,6 +47,9 @@ logger = logging.getLogger(__name__)
 # Паузы: после старта и между раздачами — увидеть результат, отдышаться.
 FIRST_HAND_DELAY = 3.0
 NEXT_HAND_DELAY = 7.0
+# Режиссура вскрытия: пауза между картами борда/игроков и до результата.
+SHOWDOWN_STEP = 1.4
+SHOWDOWN_RESULT_DELAY = 1.0
 
 
 @dataclass
@@ -76,6 +81,8 @@ class TableRuntime:
         self._tasks: set[asyncio.Task] = set()
         self._notified_key: tuple | None = None
         self._hand_start: dict[int, int] = {}
+        # Режиссируемое вскрытие: прогресс открытия карт до результата.
+        self._showdown: dict | None = None
 
     # ── Загрузка и lifecycle ─────────────────────────────────
 
@@ -341,6 +348,7 @@ class TableRuntime:
         )
         self.hand_number += 1
         self.last_result = None
+        self._showdown = None
         self._hand_start = {p.user_id: p.stack for p in eligible}
         self._set_deadline()
         await self._notify_turn_locked()
@@ -359,13 +367,91 @@ class TableRuntime:
 
     async def _post_action_locked(self) -> None:
         if self.runner is not None and self.runner.result is not None:
-            await self._finish_hand_locked()
+            await self._begin_showdown_locked()
         else:
             self._set_deadline()
             await self._notify_turn_locked()
         await broadcast_state(self.code)
 
-    async def _finish_hand_locked(self) -> None:
+    async def _begin_showdown_locked(self) -> None:
+        """Финал раздачи: вскрытие поэтапно или мгновенный результат без показа."""
+        runner = self.runner
+        result = runner.result
+        assert result is not None
+
+        if result["type"] == "uncontested" or not runner.revealed:
+            await self._apply_hand_result_locked()
+            self.schedule_next_hand(NEXT_HAND_DELAY)
+            return
+
+        public = runner.public_view()
+        n = len(runner.players)
+        # Вскрываем по местам, начиная слева от кнопки.
+        order = sorted(
+            runner.revealed.keys(),
+            key=lambda uid: next(
+                (i - runner.button) % n
+                for i, p in enumerate(runner.players)
+                if p.user_id == uid
+            ),
+        )
+        self._showdown = {
+            "board": [c.code for c in runner.board],
+            "visible_board": public["board_visible"],
+            "pot": public["pot"],
+            "players": public["players"],
+            "cards": {
+                uid: [c.code for c in cards] for uid, cards in runner.revealed.items()
+            },
+            # Карты всех участников — для личных снапшотов (свои карты видны всегда).
+            "all_cards": {
+                p.user_id: [c.code for c in p.cards] for p in runner.players
+            },
+            "revealed": [],
+            "result": result,
+            "result_visible": False,
+        }
+        self._spawn(self._showdown_timeline(order))
+
+    async def _showdown_timeline(self, reveal_order: list[int]) -> None:
+        """Добираем скрытый борд, вскрываем игроков по одному, затем результат."""
+        sd = self._showdown
+        while sd["visible_board"] < len(sd["board"]):
+            await asyncio.sleep(SHOWDOWN_STEP)
+            async with self.lock():
+                if self._showdown is not sd or self._stopped:
+                    return
+                sd["visible_board"] += 1
+                await broadcast_state(self.code)
+
+        for user_id in reveal_order:
+            await asyncio.sleep(SHOWDOWN_STEP)
+            async with self.lock():
+                if self._showdown is not sd or self._stopped:
+                    return
+                sd["revealed"].append(user_id)
+                await broadcast_state(self.code)
+
+        await asyncio.sleep(SHOWDOWN_RESULT_DELAY)
+        async with self.lock():
+            if self._showdown is not sd or self._stopped:
+                return
+            await self._apply_hand_result_locked()
+            sd["result_visible"] = True
+            # В замороженный вид — уже обновлённые стеки.
+            stacks = {p.user_id: p.stack for p in self.players}
+            for player in sd["players"]:
+                player["stack"] = stacks.get(player["user_id"], player["stack"])
+            await broadcast_state(self.code)
+
+        await asyncio.sleep(0.5)
+        async with self.lock():
+            if self._showdown is not sd or self._stopped:
+                return
+            self.schedule_next_hand(NEXT_HAND_DELAY)
+
+    async def _apply_hand_result_locked(self) -> None:
+        """Применяет результат раздачи: стеки, история, персист в БД."""
         result = self.runner.result
         assert result is not None
         hand_by_id = {p.user_id: p for p in self.runner.players}
@@ -381,10 +467,11 @@ class TableRuntime:
 
         await self._record_hand(result)
         self.last_result = result
-        self.runner = None
         self.turn_deadline = None
         await self._persist_stacks()
-        self.schedule_next_hand(NEXT_HAND_DELAY)
+        # Раздача сыграна: открываем окно для позднего входа/ребая/выхода,
+        # а показ вскрытия живёт в self._showdown до следующей раздачи.
+        self.runner = None
 
     async def _record_hand(self, result: dict) -> None:
         """История рук: борд, банк, победители и вклад каждого игрока.
@@ -514,25 +601,44 @@ class TableRuntime:
         ]
         base["hand"] = self.hand_view()
 
-        runner = self.runner
-        if runner is not None:
-            hand_player = next(
-                (p for p in runner.players if p.user_id == viewer_id), None
-            )
-            if hand_player is not None:
-                base["you"]["cards"] = [c.code for c in hand_player.cards]
-                if (
-                    runner.to_act is not None
-                    and runner.players[runner.to_act].user_id == viewer_id
-                ):
-                    base["you"]["legal_actions"] = runner.legal_actions()
+        if self._showdown is not None:
+            # Идёт вскрытие: свои карты и подсказка — по видимому борду.
+            sd = self._showdown
+            mine = sd["all_cards"].get(viewer_id)
+            if mine is not None:
+                base["you"]["cards"] = mine
+                combined = [card_from_code(c) for c in mine] + [
+                    card_from_code(c) for c in sd["board"][: sd["visible_board"]]
+                ]
+                if len(combined) >= 5:
+                    base["you"]["hand_hint"] = hand_name(best_hand(combined)[0])
+                else:
+                    base["you"]["hand_hint"] = preflop_name(combined[:2])
+        else:
+            runner = self.runner
+            if runner is not None:
+                hand_player = next(
+                    (p for p in runner.players if p.user_id == viewer_id), None
+                )
+                if hand_player is not None:
+                    base["you"]["cards"] = [c.code for c in hand_player.cards]
+                    combined = hand_player.cards + runner.board
+                    if len(combined) >= 5:
+                        base["you"]["hand_hint"] = hand_name(best_hand(combined)[0])
+                    else:
+                        base["you"]["hand_hint"] = preflop_name(hand_player.cards)
+                    if (
+                        runner.to_act is not None
+                        and runner.players[runner.to_act].user_id == viewer_id
+                    ):
+                        base["you"]["legal_actions"] = runner.legal_actions()
 
         # Доступен ли ребай прямо сейчас (между раздачами).
         me = next(
             (p for p in self.players if p.user_id == viewer_id and not p.left), None
         )
         rebuy_available = False
-        if me is not None and runner is None:
+        if me is not None and self.runner is None:
             mode = self.settings.rebuy_mode
             rebuy_available = mode == "anytime" or (mode == "busted" and me.stack == 0)
         base["you"]["rebuy_available"] = rebuy_available
@@ -554,6 +660,21 @@ class TableRuntime:
             "revealed": {},
             "last_result": self.last_result,
         }
+        if self._showdown is not None:
+            sd = self._showdown
+            view.update(
+                {
+                    "street": "showdown",
+                    "board": sd["board"][: sd["visible_board"]],
+                    "pot": sd["pot"],
+                    "players": sd["players"],
+                    "revealed": {
+                        str(uid): sd["cards"][uid] for uid in sd["revealed"]
+                    },
+                    "last_result": sd["result"] if sd["result_visible"] else None,
+                }
+            )
+            return view
         if self.runner is not None:
             public = self.runner.public_view()
             for key in ("street", "board", "pot", "current_bet", "players", "to_act", "revealed"):

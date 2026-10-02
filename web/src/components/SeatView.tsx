@@ -63,7 +63,7 @@ export default function SeatView({
       {revealedCards && revealedCards.length > 0 && (
         <div className="mini-cards">
           {revealedCards.map((c) => (
-            <PlayingCard key={c} code={c} small />
+            <PlayingCard key={c} code={c} small flip />
           ))}
         </div>
       )}

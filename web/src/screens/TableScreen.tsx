@@ -261,7 +261,7 @@ export default function TableScreen({ code, auth, onExit }: Props) {
               <div className="board">
                 {Array.from({ length: 5 }, (_, i) =>
                   hand.board[i] ? (
-                    <PlayingCard key={i} code={hand.board[i]} />
+                    <PlayingCard key={i} code={hand.board[i]} flip />
                   ) : (
                     <div key={i} className="pcard pcard-slot" />
                   ),
@@ -356,11 +356,14 @@ export default function TableScreen({ code, auth, onExit }: Props) {
               </button>
             )}
             {snap.you.cards && snap.you.cards.length > 0 ? (
-              <div className={`my-cards ${(hand.players.find((p) => p.user_id === auth.user.id)?.folded) ? 'my-cards-folded' : ''}`}>
-                {snap.you.cards.map((c) => (
-                  <PlayingCard key={c} code={c} />
-                ))}
-              </div>
+              <>
+                <div className={`my-cards ${(hand.players.find((p) => p.user_id === auth.user.id)?.folded) ? 'my-cards-folded' : ''}`}>
+                  {snap.you.cards.map((c) => (
+                    <PlayingCard key={c} code={c} />
+                  ))}
+                </div>
+                {snap.you.hand_hint && <div className="hand-hint">{snap.you.hand_hint}</div>}
+              </>
             ) : (
               <div className="my-cards my-cards-empty">
                 {me ? 'Ждём следующую раздачу…' : 'Ты наблюдаешь за игрой'}
@@ -377,11 +380,13 @@ export default function TableScreen({ code, auth, onExit }: Props) {
               />
             ) : (
               <div className="waiting-line">
-                {hand.next_hand_at != null
-                  ? `Следующая раздача через ${Math.max(1, Math.ceil(hand.next_hand_at - now))} с…`
-                  : toActName
-                    ? `Ход: ${toActName === me?.name ? 'твой' : toActName}…`
-                    : 'Раздача идёт…'}
+                {hand.street === 'showdown' && !hand.last_result
+                  ? '🔍 Вскрываем карты…'
+                  : hand.next_hand_at != null
+                    ? `Следующая раздача через ${Math.max(1, Math.ceil(hand.next_hand_at - now))} с…`
+                    : toActName
+                      ? `Ход: ${toActName === me?.name ? 'твой' : toActName}…`
+                      : 'Раздача идёт…'}
               </div>
             )}
 

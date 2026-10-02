@@ -113,6 +113,28 @@ class TestStreets:
         assert runner.result["pot_total"] == 2000
         assert sum(w["amount"] for w in runner.result["winners"]) == 2000
 
+    def test_board_visible_marks_runout_start(self) -> None:
+        runner = make([(1, 1000), (2, 1000)], button=0)
+        runner.act(1, "raise", 1000)  # олл-ин префлоп: борд был пуст
+        runner.act(2, "call")
+        assert runner.public_view()["board_visible"] == 0
+        assert len(runner.board) == 5
+
+    def test_board_visible_river_showdown_full(self) -> None:
+        runner = make([(1, 1000), (2, 1000), (3, 1000)], button=0)
+        runner.act(1, "call")
+        runner.act(2, "call")
+        runner.act(3, "check")
+        guard = 0
+        while runner.result is None:
+            guard += 1
+            assert guard < 15
+            assert "check" in runner.legal_actions()
+            runner.act(uid(runner), "check")
+        assert runner.result["type"] == "showdown"
+        # дошли до ривера торговыми кругами — борд виден целиком
+        assert runner.public_view()["board_visible"] == 5
+
     def test_short_all_in_does_not_reopen_raising(self) -> None:
         runner = make([(1, 1000), (2, 1000), (3, 150)], button=0)
         runner.act(1, "raise", 100)   # полное повышение до 100

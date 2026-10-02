@@ -72,6 +72,9 @@ class HandRunner:
         self.to_act: int | None = None
         self.revealed: dict[int, list[Card]] = {}
         self.result: dict | None = None
+        # Сколько карт борда было видно, когда торги закончились олл-инами
+        # (до ранаута) — нужно для поэтапного вскрытия на клиенте.
+        self.board_visible_before_runout: int | None = None
 
         self._deal()
 
@@ -180,6 +183,11 @@ class HandRunner:
         return {
             "street": self.street,
             "board": [c.code for c in self.board],
+            "board_visible": (
+                self.board_visible_before_runout
+                if self.board_visible_before_runout is not None
+                else len(self.board)
+            ),
             "pot": self.pot_total,
             "current_bet": self.current_bet,
             "players": [
@@ -282,7 +290,9 @@ class HandRunner:
         in_hand = [p for p in self.players if p.in_hand]
         able = [p for p in in_hand if not p.all_in]
         if len(in_hand) >= 2 and len(able) <= 1:
-            # торгов больше не будет — вскрываемся и добираем борд
+            # торгов больше не будет — фиксируем видимый борд и вскрываемся
+            if self.board_visible_before_runout is None:
+                self.board_visible_before_runout = len(self.board)
             for p in in_hand:
                 self.revealed.setdefault(p.user_id, list(p.cards))
 
