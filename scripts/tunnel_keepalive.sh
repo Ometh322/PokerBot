@@ -48,12 +48,30 @@ while true; do
   fi
 
   echo "[$(date +%H:%M:%S)] туннель: $URL"
-  curl -s -X POST http://127.0.0.1:8000/api/admin/public-url \
-      -H "Content-Type: application/json" \
-      -d "{\"url\": \"$URL\"}" && echo " — сервер переключён"
+
+  # Переключаем сервер на адрес с ретраями: при одновременном старте
+  # сервер может ещё не слушать порт (ловили гонку — адрес оставался
+  # localhost:8000 и Telegram отвергал кнопки).
+  switched=""
+  for _ in $(seq 1 24); do
+    res=$(curl -s --max-time 5 -X POST http://127.0.0.1:8000/api/admin/public-url \
+        -H "Content-Type: application/json" \
+        -d "{\"url\": \"$URL\"}" || true)
+    if echo "$res" | grep -q '"ok":true'; then
+      echo "[$(date +%H:%M:%S)] сервер переключён: $res"
+      switched=1
+      break
+    fi
+    sleep 5
+  done
+  if [ -z "$switched" ]; then
+    echo "[$(date +%H:%M:%S)] !! сервер не принял адрес за 2 минуты — продолжаю, вахта повторит"
+  fi
 
   # Вахта: провайдер может молча убить туннель, пока ssh выглядит живым —
   # опрашиваем адрес и при сбое пересоздаём (окно простоя ≈ 15–20 секунд).
+  # Заодно каждый такт повторно привязываем адрес: если сервер перезапускался
+  # (сброс на localhost:8000) — он получит актуальный туннель сам.
   (
     while kill -0 "$SSH_PID" 2>/dev/null; do
       sleep 15
@@ -63,6 +81,9 @@ while true; do
         kill "$SSH_PID" 2>/dev/null || true
         break
       fi
+      curl -s --max-time 5 -o /dev/null -X POST http://127.0.0.1:8000/api/admin/public-url \
+          -H "Content-Type: application/json" \
+          -d "{\"url\": \"$URL\"}" || true
     done
   ) &
   WATCHDOG_PID=$!
