@@ -6,6 +6,8 @@ Runtime работает со «своим» SessionLocal — в тестах п
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -84,12 +86,9 @@ class TestRebuy:
 
 
 class TestLateJoin:
-    async def test_sit_and_errors(self, env) -> None:
+    async def test_sit_anytime_waits_for_next_hand(self, env) -> None:
         rt, maker = env
-        rt.runner = object()  # «идёт раздача»
-        with pytest.raises(TableError, match="дождись"):
-            await rt.sit(3, seat=2)
-        rt.runner = None
+        rt.runner = object()  # «идёт раздача» — садиться можно уже сейчас
 
         async with maker() as session:
             await service.upsert_user(session, user_id=3, first_name="Вася")
@@ -100,9 +99,37 @@ class TestLateJoin:
         entries = [e for e in await ledger_rows(maker, rt.code) if e.user_id == 3]
         assert [e.kind for e in entries] == ["buyin"]
         assert entries[0].chips == 1000
+        # Раздача не пострадала: следующий старт включит новичка.
+        rt.runner = None
 
         with pytest.raises(TableError, match="занято"):
             await rt.sit(4, seat=2)
+
+    async def test_waiting_player_enters_next_hand(self, env) -> None:
+        rt, maker = env
+        async with maker() as session:
+            await service.upsert_user(session, user_id=3, first_name="Вася")
+            await session.commit()
+        rt.settings = TableSettings(action_timeout=None)
+
+        # Первая раздача без Васи.
+        await rt._start_hand_locked()  # noqa: SLF001
+        first_hand_players = {p.user_id for p in rt.runner.players}
+        assert first_hand_players == {1, 2}
+
+        # Во время раздачи садится третий.
+        await rt.sit(3, seat=2)
+
+        # Доигрываем раздачу движком (авто-чеки) и применяем результат.
+        while rt.runner.result is None:
+            actor = rt.runner.players[rt.runner.to_act]
+            rt.runner.auto_act(actor.user_id)
+        await rt._apply_hand_result_locked()  # noqa: SLF001
+        rt._showdown = None  # noqa: SLF001
+        rt.next_hand_at = None
+
+        await rt._start_hand_locked()  # noqa: SLF001
+        assert {p.user_id for p in rt.runner.players} == {1, 2, 3}
 
     async def test_returning_player_gets_new_buyin(self, env) -> None:
         rt, maker = env
@@ -152,7 +179,8 @@ class TestHandHistory:
             rows = (await session.execute(select(HandPlayerRow))).scalars().all()
         assert len(hands) == 1
         assert hands[0].pot_total == 2000
-        assert len(json_loads(hands[0].result_json)) == 1  # один победитель
+        # победителей может быть двое — колода случайная, возможен сплит
+        assert 1 <= len(json_loads(hands[0].result_json)) <= 2
         assert len(rows) == 2
         assert all(r.showed for r in rows)  # олл-ин — вскрытие обоих
         # фишки сохранились: 2000 у победителя, 0 у проигравшего
@@ -185,3 +213,36 @@ class TestLedgerBalance:
         cashed = sum(e.chips for e in entries if e.kind == "cashout")
         assert bought == 3000  # 2×1000 на старте + ребай
         assert cashed == 3000  # 2000 (выход) + 1000 (финал)
+
+
+class TestTurnTimers:
+    async def test_stale_timer_cancelled_on_new_turn(self, env) -> None:
+        """Протухший таймер не должен автофолдить следующего игрока."""
+        rt, _ = env
+        rt.settings = TableSettings(action_timeout=30)
+        rt.hand_number = 0
+        await rt._start_hand_locked()  # noqa: SLF001 — тестируем таймеры напрямую
+
+        stale = rt._timer_task  # noqa: SLF001
+        assert stale is not None and not stale.done()
+        actor = rt.runner.players[rt.runner.to_act]
+        await rt.act(actor.user_id, "call")
+        await asyncio.sleep(0)  # тик цикла — доставка CancelledError
+
+        assert stale.cancelled() or stale.done()
+        assert rt._timer_task is not stale  # noqa: SLF001 — новый ход = новый таймер
+
+    async def test_timer_ignores_foreign_deadline(self, env) -> None:
+        """Таймер с чужим (старым) дедлайном ничего не делает."""
+        rt, _ = env
+        rt.settings = TableSettings(action_timeout=30)
+        rt.hand_number = 0
+        await rt._start_hand_locked()  # noqa: SLF001
+
+        runner = rt.runner
+        to_act = runner.to_act
+        # Симулируем срабатывание таймера с чужим дедлайном.
+        await rt._timeout(0.0, deadline=12345.0)  # noqa: SLF001
+
+        assert runner.to_act == to_act  # никто не автофолднулся
+        assert not runner.players[to_act].folded

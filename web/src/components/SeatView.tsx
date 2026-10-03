@@ -12,6 +12,7 @@ interface Props {
   revealedCards?: string[]
   isMe: boolean
   isWinner?: boolean
+  waiting?: boolean // сидит за столом, но вступит в игру со следующей раздачи
 }
 
 export default function SeatView({
@@ -23,6 +24,7 @@ export default function SeatView({
   revealedCards,
   isMe,
   isWinner,
+  waiting,
 }: Props) {
   const folded = hand?.folded ?? false
   const ringStyle =
@@ -58,8 +60,8 @@ export default function SeatView({
       <div className="seat-stack" key={stack}>
         {stack}
       </div>
-      {hand && hand.bet > 0 && <div className="bet-chip">💰 {hand.bet}</div>}
       {hand?.all_in && <div className="allin-tag">ALL IN</div>}
+      {waiting && <div className="wait-tag">⏳ ждёт</div>}
       {revealedCards && revealedCards.length > 0 && (
         <div className="mini-cards">
           {revealedCards.map((c) => (

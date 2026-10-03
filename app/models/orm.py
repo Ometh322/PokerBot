@@ -115,3 +115,18 @@ class HandPlayerRow(Base):
     contributed: Mapped[int] = mapped_column(Integer)
     folded: Mapped[bool] = mapped_column(Boolean, default=False)
     showed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class StartButtonMessage(Base):
+    """Последнее /start-сообщение бота с кнопкой Mini App.
+
+    Telegram «зашивает» URL кнопки в момент отправки; при ротации туннеля
+    редактируем сообщение, чтобы старые кнопки не вели на мёртвый адрес.
+    """
+
+    __tablename__ = "start_button_messages"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    message_id: Mapped[int] = mapped_column(Integer)
+    table_code: Mapped[str | None] = mapped_column(String(8))

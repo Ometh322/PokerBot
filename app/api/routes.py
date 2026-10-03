@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.auth import issue_session_token, parse_user, validate_init_data
 from app.api.deps import current_user_id
+from app.bot import buttons as bot_buttons
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models.orm import Hand, User
@@ -186,3 +187,31 @@ async def get_table(code: str, user_id: int = Depends(current_user_id)) -> dict:
         if table is None:
             raise HTTPException(status_code=404, detail="стол не найден")
         return await service.build_snapshot(session, table, user_id)
+
+
+@api_router.post("/admin/public-url")
+async def set_public_url(body: PublicUrlRequest, request: Request) -> dict:
+    """Переключить публичный адрес Mini App без рестарта сервера.
+
+    Только с localhost — используется скриптом-переключателем туннеля
+    (scripts/tunnel_keepalive.sh). Заодно перевязывает кнопки в уже
+    отправленных сообщениях бота на новый адрес.
+    """
+    peer = request.client.host if request.client else ""
+    if peer not in ("127.0.0.1", "::1", "localhost", "testclient"):
+        raise HTTPException(status_code=403, detail="только с этого сервера")
+    settings = get_settings()
+    settings.base_url = body.url.rstrip("/")
+    await bot_buttons.rebind_all(settings.base_url)
+    return {"ok": True, "base_url": settings.base_url}
+
+
+@api_router.api_route("/{rest:path}", methods=["GET", "POST"], include_in_schema=False)
+async def api_fallback(rest: str) -> dict:
+    # Без этого неизвестные /api-пути улетают в статику и возвращают
+    # index.html (HTML), от которого ломается JSON-парсинг на клиенте.
+    raise HTTPException(status_code=404, detail=f"неизвестный метод API: /{rest}")
+
+
+class PublicUrlRequest(BaseModel):
+    url: str

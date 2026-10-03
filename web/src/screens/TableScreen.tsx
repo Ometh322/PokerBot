@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchTable, type AuthResponse } from '../api'
 import { connectTableSocket, type TableOutMessage, type TableSocket } from '../ws'
 import { chipLabel, rebuyLabel, statusLabel } from '../ui'
@@ -305,23 +305,38 @@ export default function TableScreen({ code, auth, onExit }: Props) {
                 !live &&
                   hand.last_result?.winners.some((w) => w.user_id === player.user_id),
               )
+              // Ставка — на сукне, на полпути от игрока к центру стола.
+              const betX = 50 + (x - 50) * 0.5
+              const betY = 46 + (y - 46) * 0.5
               return (
-                <div
-                  key={seat}
-                  className="seat-pos"
-                  style={{ left: `${x}%`, top: `${y}%` }}
-                >
-                  <SeatView
-                    player={player}
-                    hand={hp}
-                    isDealer={hand.dealer_seat === seat}
-                    isToAct={isToAct}
-                    timeFrac={timeFrac}
-                    revealedCards={revealed}
-                    isMe={player.user_id === auth.user.id}
-                    isWinner={isWinner}
-                  />
-                </div>
+                <Fragment key={seat}>
+                  <div
+                    className="seat-pos"
+                    style={{ left: `${x}%`, top: `${y}%` }}
+                  >
+                    <SeatView
+                      player={player}
+                      hand={hp}
+                      isDealer={hand.dealer_seat === seat}
+                      isToAct={isToAct}
+                      timeFrac={timeFrac}
+                      revealedCards={revealed}
+                      isMe={player.user_id === auth.user.id}
+                      isWinner={isWinner}
+                      waiting={live && !hp}
+                    />
+                  </div>
+                  {hp && hp.bet > 0 && (
+                    <div
+                      className="bet-pos"
+                      style={{ left: `${betX}%`, top: `${betY}%` }}
+                    >
+                      <span className="bet-chip" key={hp.bet}>
+                        💰 {hp.bet}
+                      </span>
+                    </div>
+                  )}
+                </Fragment>
               )
             })}
           </div>
@@ -344,7 +359,8 @@ export default function TableScreen({ code, auth, onExit }: Props) {
                   ))}
               </div>
               <p className="hint">
-                Вход со стартовым стеком {snap.settings.starting_stack}, между раздачами
+                Вход со стартовым стеком {snap.settings.starting_stack} — вступишь в
+                игру с ближайшей раздачи, текущую досмотришь
               </p>
             </section>
           )}
@@ -366,7 +382,11 @@ export default function TableScreen({ code, auth, onExit }: Props) {
               </>
             ) : (
               <div className="my-cards my-cards-empty">
-                {me ? 'Ждём следующую раздачу…' : 'Ты наблюдаешь за игрой'}
+                {me
+                  ? live
+                    ? 'Ты за столом — вступишь в игру со следующей раздачи…'
+                    : 'Ждём следующую раздачу…'
+                  : 'Ты наблюдаешь за игрой'}
               </div>
             )}
 

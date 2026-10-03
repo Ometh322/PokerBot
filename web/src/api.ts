@@ -29,6 +29,9 @@ async function request<T>(
     headers: {
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      // Бесплатный pinggy показывает API-запросам HTML-страницу-предупреждение;
+      // этот заголовок отключает её (документация pinggy).
+      'X-Pinggy-No-Screen': '1',
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
@@ -47,7 +50,19 @@ async function request<T>(
     }
     throw new ApiError(message)
   }
-  return (await res.json()) as T
+  const contentType = res.headers.get('content-type') ?? ''
+  if (contentType.includes('text/html')) {
+    // HTML вместо JSON обычно значит: туннель перезапущен, приложение открыто
+    // из старой сессии. Игра при этом жива на сервере.
+    throw new ApiError(
+      'связь с сервером потеряна (туннель перезапущен) — закрой и заново открой приложение из бота',
+    )
+  }
+  try {
+    return (await res.json()) as T
+  } catch {
+    throw new ApiError('сервер вернул неожиданный ответ')
+  }
 }
 
 export function authenticate(initData: string): Promise<AuthResponse> {

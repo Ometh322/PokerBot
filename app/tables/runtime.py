@@ -81,6 +81,7 @@ class TableRuntime:
         self._tasks: set[asyncio.Task] = set()
         self._notified_key: tuple | None = None
         self._hand_start: dict[int, int] = {}
+        self._timer_task: asyncio.Task | None = None
         # Режиссируемое вскрытие: прогресс открытия карт до результата.
         self._showdown: dict | None = None
 
@@ -129,10 +130,11 @@ class TableRuntime:
             task.cancel()
         self._tasks.clear()
 
-    def _spawn(self, coro) -> None:
+    def _spawn(self, coro) -> asyncio.Task:
         task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        return task
 
     async def _delayed_hand(self, delay: float) -> None:
         await asyncio.sleep(delay)
@@ -233,10 +235,12 @@ class TableRuntime:
             await broadcast_state(self.code)
 
     async def sit(self, user_id: int, seat: int) -> None:
-        """Поздний вход в активную игру: стартовый стек, между раздачами."""
+        """Поздний вход в активную игру: садимся в любой момент.
+
+        Если раздача идёт — игрок занимает место и вступает в игру
+        со следующей раздачи (текущая продолжает без него).
+        """
         async with self.lock():
-            if self.runner is not None:
-                raise TableError("дождись конца раздачи, чтобы сесть")
             if not 0 <= seat < self.settings.max_seats:
                 raise TableError("нет такого места")
             if any(not p.left and p.seat == seat for p in self.players):
@@ -467,7 +471,7 @@ class TableRuntime:
 
         await self._record_hand(result)
         self.last_result = result
-        self.turn_deadline = None
+        self._clear_deadline()
         await self._persist_stacks()
         # Раздача сыграна: открываем окно для позднего входа/ребая/выхода,
         # а показ вскрытия живёт в self._showdown до следующей раздачи.
@@ -529,25 +533,39 @@ class TableRuntime:
 
     def _set_deadline(self) -> None:
         if self.runner is None or self.runner.to_act is None:
-            self.turn_deadline = None
+            self._clear_deadline()
             return
         if self.settings.action_timeout is None:
-            self.turn_deadline = None
+            self._clear_deadline()
             return
         self.turn_deadline = time.time() + self.settings.action_timeout
         self._arm_timer()
 
+    def _clear_deadline(self) -> None:
+        """Гасит дедлайн и таймер: сработавший «не свой» таймер не должен
+        автофолдить игрока, чей ход начался позже (ловили такой баг)."""
+        self.turn_deadline = None
+        if self._timer_task is not None and not self._timer_task.done():
+            self._timer_task.cancel()
+        self._timer_task = None
+
     def _arm_timer(self) -> None:
+        # Новый ход = новый таймер; старый обязательно гасим.
+        if self._timer_task is not None and not self._timer_task.done():
+            self._timer_task.cancel()
+        self._timer_task = None
         if self.turn_deadline is None:
             return
         delay = max(0.2, self.turn_deadline - time.time())
-        self._spawn(self._timeout(delay))
+        self._timer_task = self._spawn(self._timeout(delay, self.turn_deadline))
 
-    async def _timeout(self, delay: float) -> None:
+    async def _timeout(self, delay: float, deadline: float) -> None:
         await asyncio.sleep(delay)
         async with self.lock():
+            if self._stopped or self.turn_deadline != deadline:
+                return  # ход уже сменился — это чужой таймер
             runner = self.runner
-            if self._stopped or runner is None or runner.to_act is None:
+            if runner is None or runner.to_act is None:
                 return
             user_id = runner.players[runner.to_act].user_id
             runner.auto_act(user_id)

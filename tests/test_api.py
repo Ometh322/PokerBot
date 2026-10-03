@@ -28,6 +28,23 @@ def test_tables_require_auth() -> None:
         assert client.post("/api/tables", json={}).status_code == 401
 
 
+def test_api_unknown_path_returns_json() -> None:
+    # Неизвестный /api-путь должен отвечать JSON, а не index.html статики.
+    with TestClient(create_app()) as client:
+        res = client.get("/api/nope")
+    assert res.status_code == 404
+    assert res.headers["content-type"].startswith("application/json")
+
+
+def test_admin_public_url_switch() -> None:
+    with TestClient(create_app()) as client:
+        res = client.post(
+            "/api/admin/public-url", json={"url": "https://x.example.com/"}
+        )
+    assert res.status_code == 200
+    assert res.json()["base_url"] == "https://x.example.com"
+
+
 def test_dev_auth_and_tables_flow() -> None:
     with TestClient(create_app()) as client:
         auth = client.post(

@@ -17,3 +17,8 @@ web/dist/
 .DS_Store
 Thumbs.db
 .tools/
+
+# Артефакты сборки TS
+*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts

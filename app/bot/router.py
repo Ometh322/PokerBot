@@ -11,6 +11,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 
+from app.bot import buttons
 from app.config import get_settings
 
 router = Router(name="main")
@@ -39,7 +40,7 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         code = payload.removeprefix("tbl_")
         settings = get_settings()
         url = f"{settings.base_url.rstrip('/')}/?table={code}"
-        await message.answer(
+        sent = await message.answer(
             "Тебя ждут за игровым столом 🂠\n\nЖми кнопку — сядешь за него.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -52,11 +53,22 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
                 ]
             ),
         )
+        if message.from_user is not None:
+            await buttons.remember(
+                message.from_user.id,
+                message.chat.id,
+                sent.message_id,
+                table_code=code,
+            )
         return
 
-    await message.answer(
+    sent = await message.answer(
         "Привет! Это покер-клуб для своих: безлимитный Холдем "
         "на условные фишки.\n\n"
         "Жми кнопку — откроется клуб.",
         reply_markup=open_club_keyboard(),
     )
+    if message.from_user is not None:
+        await buttons.remember(
+            message.from_user.id, message.chat.id, sent.message_id
+        )
