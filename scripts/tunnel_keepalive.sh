@@ -11,26 +11,33 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PROVIDER="${TUNNEL_PROVIDER:-lhr}"
-# Стабильный поддомен: LHR_DOMAIN=kartishki.lhr.life — нужен добавленный
-# в аккаунт localhost.run SSH-ключ (.tools/lhr_key). Тогда адрес туннеля
-# НЕ меняется при пересоздании, и игроки переживают ротацию без переподключения.
+PROVIDER="${TUNNEL_PROVIDER:-serveo}"
+# Стабильное имя (serveo): SERVEO_NAME=kartishki — после регистрации SSH-ключа
+# в консоли serveo.net имя не меняется при пересоздании туннеля.
+SERVEO_NAME="${SERVEO_NAME:-kartishki}"
+# Стабильный поддомен (localhost.run): LHR_DOMAIN=… — платная функция, тут не используется.
 LHR_DOMAIN="${LHR_DOMAIN:-}"
 mkdir -p .tools
 
 case "$PROVIDER" in
+  serveo)
+    SSH_CMD=(ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
+             -i .tools/lhr_key \
+             -R "$SERVEO_NAME:80:localhost:8000" serveo.net)
+    URL_RE="https://[a-z0-9-]+\.serveousercontent\.com"
+    ;;
   lhr)
     if [ -n "$LHR_DOMAIN" ]; then
+      # Кастомный поддомен требует входа под аккаунтом (plan@) и ключа.
       SSH_CMD=(ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
                -i .tools/lhr_key \
-               -R "$LHR_DOMAIN:80:localhost:8000" nokey@localhost.run)
+               -R "$LHR_DOMAIN:80:localhost:8000" plan@localhost.run)
       URL="https://$LHR_DOMAIN"
-      URL_RE="https://[a-z0-9-]+\.lhr\.life"
     else
       SSH_CMD=(ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:8000 nokey@localhost.run)
       URL=""
-      URL_RE="https://[a-z0-9-]+\.lhr\.life"
     fi
+    URL_RE="https://[a-z0-9-]+\.lhr\.life"
     ;;
   pinggy)
     SSH_CMD=(ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:8000 a.pinggy.io)
@@ -38,7 +45,7 @@ case "$PROVIDER" in
     URL_RE="https://[a-z0-9.-]+\.pinggy\.net"
     ;;
   *)
-    echo "неизвестный TUNNEL_PROVIDER: $PROVIDER (доступны lhr, pinggy)"
+    echo "неизвестный TUNNEL_PROVIDER: $PROVIDER (доступны serveo, lhr, pinggy)"
     exit 1
     ;;
 esac
