@@ -12,15 +12,29 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PROVIDER="${TUNNEL_PROVIDER:-lhr}"
+# Стабильный поддомен: LHR_DOMAIN=kartishki.lhr.life — нужен добавленный
+# в аккаунт localhost.run SSH-ключ (.tools/lhr_key). Тогда адрес туннеля
+# НЕ меняется при пересоздании, и игроки переживают ротацию без переподключения.
+LHR_DOMAIN="${LHR_DOMAIN:-}"
 mkdir -p .tools
 
 case "$PROVIDER" in
   lhr)
-    SSH_CMD=(ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:8000 nokey@localhost.run)
-    URL_RE="https://[a-z0-9-]+\.lhr\.life"
+    if [ -n "$LHR_DOMAIN" ]; then
+      SSH_CMD=(ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 \
+               -i .tools/lhr_key \
+               -R "$LHR_DOMAIN:80:localhost:8000" nokey@localhost.run)
+      URL="https://$LHR_DOMAIN"
+      URL_RE="https://[a-z0-9-]+\.lhr\.life"
+    else
+      SSH_CMD=(ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:8000 nokey@localhost.run)
+      URL=""
+      URL_RE="https://[a-z0-9-]+\.lhr\.life"
+    fi
     ;;
   pinggy)
     SSH_CMD=(ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:8000 a.pinggy.io)
+    URL=""
     URL_RE="https://[a-z0-9.-]+\.pinggy\.net"
     ;;
   *)
@@ -34,17 +48,26 @@ while true; do
   "${SSH_CMD[@]}" > .tools/tunnel.log 2>&1 &
   SSH_PID=$!
 
-  URL=""
-  for _ in $(seq 1 20); do
-    sleep 1
-    URL=$(grep -oE "$URL_RE" .tools/tunnel.log | head -1 || true)
-    [ -n "$URL" ] && break
-  done
   if [ -z "${URL:-}" ]; then
-    echo "[$(date +%H:%M:%S)] адрес не получен, повтор через 5 с"
-    kill "$SSH_PID" 2>/dev/null || true
-    sleep 5
-    continue
+    # Анонимный режим: адрес выдаётся в логе.
+    for _ in $(seq 1 20); do
+      sleep 1
+      URL=$(grep -oE "$URL_RE" .tools/tunnel.log | head -1 || true)
+      [ -n "$URL" ] && break
+    done
+    if [ -z "${URL:-}" ]; then
+      echo "[$(date +%H:%M:%S)] адрес не получен, повтор через 5 с"
+      kill "$SSH_PID" 2>/dev/null || true
+      sleep 5
+      continue
+    fi
+  else
+    # Стабильный домен: ждём, пока туннель начнёт отвечать.
+    for _ in $(seq 1 30); do
+      sleep 1
+      code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$URL/api/health" || true)
+      [ "$code" = "200" ] && break
+    done
   fi
 
   echo "[$(date +%H:%M:%S)] туннель: $URL"

@@ -1,4 +1,9 @@
-// WebSocket-клиент стола: переподключение с задержкой, пинг для живости.
+// WebSocket-клиент стола: бесконечное переподключение, пинг для живости.
+//
+// Туннель время от времени ротируется (вахта пересоздаёт его за ~20 с на
+// том же адресе) — клиент терпеливо ретраит до успеха, игра на сервере
+// тем временем не останавливается. onError используется только для
+// содержательных ошибок (авторизация, действия сервера).
 
 import type { Snapshot } from './types'
 
@@ -20,9 +25,11 @@ export interface TableSocket {
 interface Handlers {
   onState: (snapshot: Snapshot) => void
   onError?: (message: string) => void
+  onReconnecting?: (lost: boolean) => void // true — связь потеряна, ретраим
 }
 
-const MAX_ATTEMPTS = 8
+const NOTIFY_AFTER_FAILURES = 3
+const MAX_BACKOFF = 5000
 
 export function connectTableSocket(code: string, token: string, handlers: Handlers): TableSocket {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -30,14 +37,15 @@ export function connectTableSocket(code: string, token: string, handlers: Handle
 
   let ws: WebSocket | null = null
   let closed = false
-  let attempts = 0
+  let failures = 0
   let retryTimer: number | undefined
   let pingTimer: number | undefined
 
   const open = () => {
     ws = new WebSocket(url)
     ws.onopen = () => {
-      attempts = 0
+      if (failures >= NOTIFY_AFTER_FAILURES) handlers.onReconnecting?.(false)
+      failures = 0
       pingTimer = window.setInterval(() => {
         if (ws?.readyState === WebSocket.OPEN) ws.send('{"type":"ping"}')
       }, 25000)
@@ -53,13 +61,15 @@ export function connectTableSocket(code: string, token: string, handlers: Handle
     }
     ws.onclose = (ev: CloseEvent) => {
       window.clearInterval(pingTimer)
-      if (closed || ev.code === 4401) return
-      attempts += 1
-      if (attempts > MAX_ATTEMPTS) {
-        handlers.onError?.('соединение потеряно')
-        return
+      if (closed || ev.code === 4401) return // 4401 — нет авторизации, ретраить бессмысленно
+      failures += 1
+      if (failures === NOTIFY_AFTER_FAILURES) {
+        handlers.onReconnecting?.(true)
       }
-      retryTimer = window.setTimeout(open, Math.min(1000 * attempts, 5000))
+      retryTimer = window.setTimeout(open, Math.min(500 * failures, MAX_BACKOFF))
+    }
+    ws.onerror = () => {
+      // обработка — в onclose (следует за onerror)
     }
   }
 

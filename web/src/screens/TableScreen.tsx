@@ -26,6 +26,8 @@ export default function TableScreen({ code, auth, onExit }: Props) {
   const [soundOn, setSoundOn] = useState(() => soundEnabled())
   const sockRef = useRef<TableSocket | null>(null)
 
+  const [reconnecting, setReconnecting] = useState(false)
+
   useEffect(() => {
     fetchTable(auth.token, code).then(setSnap).catch(() => undefined)
     const sock = connectTableSocket(code, auth.token, {
@@ -34,6 +36,7 @@ export default function TableScreen({ code, auth, onExit }: Props) {
         setError(message)
         window.setTimeout(() => setError(''), 4000)
       },
+      onReconnecting: (lost) => setReconnecting(lost),
     })
     sockRef.current = sock
     return () => sock.close()
@@ -154,6 +157,12 @@ export default function TableScreen({ code, auth, onExit }: Props) {
       </div>
 
       {error && <div className="panel error-banner">{error}</div>}
+      {reconnecting && (
+        <div className="panel dev-banner">
+          🔄 Связь прервалась (ротация туннеля) — переподключаемся… Игра на сервере
+          продолжается, подожди несколько секунд.
+        </div>
+      )}
 
       {snap.status === 'lobby' && (
         <>

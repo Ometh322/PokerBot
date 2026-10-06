@@ -22,3 +22,4 @@ Thumbs.db
 *.tsbuildinfo
 web/vite.config.js
 web/vite.config.d.ts
+.tools/
