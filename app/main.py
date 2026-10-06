@@ -95,10 +95,27 @@ async def run() -> None:
     dp = Dispatcher()
     dp.include_router(bot_router)
 
-    await _startup_prepare(bot)
+    async def _polling_forever() -> None:
+        """Polling переживает волны DPI: стартовый запрос может упасть
+        до внутреннего цикла ретраев aiogram — тогда просто пробуем снова."""
+        while True:
+            try:
+                await dp.start_polling(bot)
+                return  # штатное завершение (остановка процесса)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "polling упал (%s) — перезапуск через 5 с", type(exc).__name__
+                )
+                await asyncio.sleep(5)
 
+    # Сервер стартует сразу, параллельно с подготовкой бота: если Telegram
+    # недоступен (DPI-волны), Mini App и API всё равно работают, а бот
+    # дождётся окна связи сам.
+    prepare = asyncio.create_task(_startup_prepare(bot))
     try:
-        await asyncio.gather(dp.start_polling(bot), server.serve())
+        await asyncio.gather(_polling_forever(), prepare, server.serve())
     finally:
         await bot.session.close()
 
