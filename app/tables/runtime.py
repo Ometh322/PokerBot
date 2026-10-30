@@ -549,14 +549,21 @@ class TableRuntime:
         """Гасит дедлайн и таймер: сработавший «не свой» таймер не должен
         автофолдить игрока, чей ход начался позже (ловили такой баг)."""
         self.turn_deadline = None
-        if self._timer_task is not None and not self._timer_task.done():
-            self._timer_task.cancel()
+        task = self._timer_task
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            # Отмена «чужого» таймера. Себя не отменяем: таймер, который
+            # сам привёл к _clear_deadline (авто-действие), ещё досылает
+            # результат — отмена убивала его рассылку и хвост раздачи.
+            task.cancel()
         self._timer_task = None
 
     def _arm_timer(self) -> None:
-        # Новый ход = новый таймер; старый обязательно гасим.
-        if self._timer_task is not None and not self._timer_task.done():
-            self._timer_task.cancel()
+        # Новый ход = новый таймер; старый обязательно гасим (кроме случая,
+        # когда перевооружаемся из самого таймера — см. _clear_deadline).
+        current = asyncio.current_task()
+        old = self._timer_task
+        if old is not None and not old.done() and old is not current:
+            old.cancel()
         self._timer_task = None
         if self.turn_deadline is None:
             return

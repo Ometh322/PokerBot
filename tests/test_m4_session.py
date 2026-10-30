@@ -300,3 +300,30 @@ class TestNoFreezeOnSlowNetwork:
         assert stalled.attempts == 1
         room.remove(999, stalled)  # type: ignore[arg-purpose]
         rt.stop()
+
+    async def test_timeout_auto_folds_and_broadcasts(self, env, monkeypatch) -> None:
+        """Полный сценарий игрока: время вышло → авто-фолд → рассылка ушла,
+        хвост раздачи (история, следующая раздача) не оборван само-отменой."""
+        rt, _ = env
+        rt.settings = TableSettings(action_timeout=30)
+        rt.hand_number = 0
+
+        done = asyncio.Event()
+        orig = runtime_module.broadcast_state
+
+        async def spy(code):
+            await orig(code)
+            done.set()
+
+        monkeypatch.setattr(runtime_module, "broadcast_state", spy)
+
+        await rt._start_hand_locked()  # noqa: SLF001
+        deadline = rt.turn_deadline
+        actor = rt.runner.players[rt.runner.to_act]
+
+        # Срабатывание таймера по своему (актуальному) дедлайну.
+        await asyncio.wait_for(rt._timeout(0.0, deadline), timeout=5)  # noqa: SLF001
+
+        await asyncio.wait_for(done.wait(), timeout=5), "рассылка после авто-фолда потеряна"
+        assert actor.folded, "авто-фолд не состоялся"
+        assert rt.next_hand_at is not None, "хвост раздачи оборван: следующая не запланирована"
