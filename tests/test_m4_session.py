@@ -7,6 +7,7 @@ Runtime работает со «своим» SessionLocal — в тестах п
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from app.game.hand import HandPlayer, HandRunner
 from app.models.orm import Base, Hand, HandPlayerRow, LedgerEntry
 from app.tables import runtime as runtime_module
 from app.tables import service
+from app.tables.rooms import room_manager
 from app.tables.runtime import TableRuntime
 from app.tables.service import TableError
 from app.tables.settings import TableSettings
@@ -246,3 +248,55 @@ class TestTurnTimers:
 
         assert runner.to_act == to_act  # никто не автофолднулся
         assert not runner.players[to_act].folded
+
+
+class TestNoFreezeOnSlowNetwork:
+    """Медленный прокси/сокет не должен замораживать игру (ловили фриз)."""
+
+    async def test_offline_pm_does_not_block_game(self, env, monkeypatch) -> None:
+        """PM оффлайн-игроку уходит в фоне: старт раздачи и ходы не ждут его."""
+        rt, _ = env
+
+        started = asyncio.Event()
+
+        async def hanging_pm(*args, **kwargs) -> None:
+            started.set()
+            await asyncio.sleep(30)
+
+        monkeypatch.setattr(runtime_module.sender, "pm", hanging_pm)
+
+        t0 = time.monotonic()
+        await rt._start_hand_locked()  # noqa: SLF001
+        await asyncio.wait_for(started.wait(), timeout=2)  # PM отправлен
+        assert time.monotonic() - t0 < 5, "старт раздачи заблокирован PM"
+
+        # Ход следующего игрока тоже не ждёт зависшей отправки.
+        actor = rt.runner.players[rt.runner.to_act]
+        await asyncio.wait_for(rt.act(actor.user_id, "call"), timeout=5)
+        rt.stop()
+
+    async def test_broadcast_skips_stalled_socket(self, env) -> None:
+        """Рассылка не виснет на полумёртвом сокете (таймаут 5 с)."""
+        rt, _ = env
+        rt.settings = TableSettings(action_timeout=None)
+        rt.hand_number = 0
+        await rt._start_hand_locked()  # noqa: SLF001
+
+        class StalledSocket:
+            def __init__(self) -> None:
+                self.attempts = 0
+
+            async def send_json(self, payload) -> None:
+                self.attempts += 1
+                await asyncio.sleep(30)
+
+        stalled = StalledSocket()
+        room = room_manager.get_room(rt.code)
+        room.add(999, stalled)  # type: ignore[arg-purpose]
+
+        t0 = time.monotonic()
+        await asyncio.wait_for(runtime_module.broadcast_state(rt.code), timeout=15)
+        assert time.monotonic() - t0 < 12, "рассылка заблокирована мёртвым сокетом"
+        assert stalled.attempts == 1
+        room.remove(999, stalled)  # type: ignore[arg-purpose]
+        rt.stop()

@@ -322,11 +322,15 @@ class TableRuntime:
                 finished_now = True
             await session.commit()
         if finished_now:
-            # Стол опустел — тоже шлём сводку по итогам сессии.
-            async with SessionLocal() as session:
-                fresh = await service.get_table(session, self.code)
-                if fresh is not None:
-                    await settlement.notify_table_finished(session, fresh)
+            # Стол опустел — сводка по итогам сессии. Вне замка: PM-отправки
+            # через прокси могут подвисать, а мы всё ещё держим lock().
+            async def _notify_settlement() -> None:
+                async with SessionLocal() as session:
+                    fresh = await service.get_table(session, self.code)
+                    if fresh is not None:
+                        await settlement.notify_table_finished(session, fresh)
+
+            self._spawn(_notify_settlement())
 
     # ── Внутреннее: ход раздачи ──────────────────────────────
 
@@ -568,7 +572,12 @@ class TableRuntime:
             if runner is None or runner.to_act is None:
                 return
             user_id = runner.players[runner.to_act].user_id
-            runner.auto_act(user_id)
+            try:
+                runner.auto_act(user_id)
+            except EngineError as exc:
+                # даже если авто-действие не удалось — раздача не должна встать
+                logger.warning("авто-действие %s не удалось: %s", user_id, exc)
+                return
             await self._post_action_locked()
 
     async def _notify_turn_locked(self) -> None:
@@ -586,13 +595,14 @@ class TableRuntime:
         self._notified_key = key
         settings = get_settings()
         url = f"{settings.base_url.rstrip('/')}/?table={self.code}"
-        await sender.pm(
-            user_id,
+        text = (
             f"🎰 Твой ход — раздача #{self.hand_number}, банк {runner.pot_total}.\n"
-            f"Не успеешь за таймер — автоматически чек или фолд.",
-            button_text="За стол",
-            button_url=url,
+            f"Не успеешь за таймер — автоматически чек или фолд."
         )
+
+        # Вне замка: отправка через прокси может подвисать — игра не должна
+        # ждать её (ловили полный фриз стола на медленном HAPP).
+        self._spawn(sender.pm(user_id, text, button_text="За стол", button_url=url))
 
     # ── Снапшоты ─────────────────────────────────────────────
 
@@ -791,7 +801,9 @@ async def send_initial(ws, code: str, viewer_id: int) -> None:
 
 
 async def _send(ws, payload: dict) -> None:
+    """Отправка в сокет с таймаутом: полумёртвое соединение одного игрока
+    не должно тормозить рассылку (она идёт под игровым замком)."""
     try:
-        await ws.send_json(payload)
+        await asyncio.wait_for(ws.send_json(payload), timeout=5)
     except Exception:  # noqa: BLE001 — мёртвый сокет уберёт ws-цикл
         pass
